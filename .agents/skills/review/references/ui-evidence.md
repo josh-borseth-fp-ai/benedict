@@ -36,7 +36,7 @@ Verify the recording saved successfully and check its relevant beginning/result 
 
 For a PR-opening workflow, attach evidence when creating the PR. During review, attach missing evidence to that same PR description or a conversation comment when publication is authorized. A local-only review must not upload or post anything; retain local artifact paths and the capture request in its local report.
 
-Use a supported authenticated GitHub attachment uploader. Check the installed `gh` command's help before using `--attach`; older versions lack it. A compatible GitHub CLI can upload media and rewrite local references from a Markdown body file into hosted URLs:
+Use a supported authenticated GitHub attachment uploader. GitHub CLI attachments require push access to the target repository; if the signed-in account lacks it, use an authorized account or hand the upload back to a maintainer. Check the installed `gh` command's help before using `--attach`; older versions lack it. A compatible GitHub CLI can upload media and rewrite local references from a Markdown body file into hosted URLs:
 
 ```sh
 gh pr create --title "PR title" --body-file /tmp/pr-body.md \
