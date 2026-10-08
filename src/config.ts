@@ -1,16 +1,11 @@
 import { Effect, FileSystem, Path, Schema } from "effect"
 import picomatch from "picomatch"
-import { parseDocument } from "yaml"
 import { ConfigFile, ReviewError } from "./model.js"
 import type { ReviewConfig, Skill } from "./model.js"
+import { loadOrganization, readRepositoryKnowledge } from "./knowledge.js"
+import { parseConfig, resolvePolicy } from "./policy.js"
 
-const defaultRules = [
-  "Do not report style-only issues.",
-  "Only report a real defect or a meaningful risk.",
-  "Prefer evidence from the repository over assumptions."
-]
-
-export const loadConfig = Effect.fn("Review.loadConfig")(function*(root: string, explicit?: string) {
+export const readRepositoryConfig = Effect.fn("Review.readConfig")(function*(root: string, explicit?: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const files = explicit === undefined
@@ -28,42 +23,27 @@ export const loadConfig = Effect.fn("Review.loadConfig")(function*(root: string,
   let decoded: ConfigFile = {}
   if (source !== null) {
     const text = yield* fs.readFileString(source)
-    const parsed = yield* Effect.try({
-      try: () => {
-        if (source.endsWith(".json")) return JSON.parse(text) as unknown
-        const document = parseDocument(text, { uniqueKeys: true })
-        if (document.errors.length > 0) throw new Error(document.errors.map((e) => e.message).join("; "))
-        return document.toJS({ maxAliasCount: 50 }) as unknown
-      },
-      catch: (error) => new ReviewError({ code: "config_error", message: `Invalid config ${source}: ${String(error)}` })
-    })
+    const parsed = yield* parseConfig(text, source)
     decoded = yield* Schema.decodeUnknownEffect(ConfigFile, { onExcessProperty: "error" })(parsed).pipe(
       Effect.mapError((error) => new ReviewError({ code: "config_error", message: `Invalid config ${source}: ${error.message}` }))
     )
-    yield* Effect.try({
-      try: () => {
-        for (const { pattern } of decoded.paths ?? []) {
-          if (pattern.startsWith("/") || pattern.includes("\\") || pattern.split("/").includes("..")) {
-            throw new Error(`Path pattern must be repository-relative with forward slashes: ${pattern}`)
-          }
-          picomatch(pattern, { dot: true, strictBrackets: true })
-        }
-      },
-      catch: (error) => new ReviewError({ code: "config_error", message: String(error) })
-    })
   }
-  return {
-    source,
-    skills: [...new Set<Skill>(decoded.skills ?? ["correctness", "security"])],
-    minimumSeverity: decoded.severity?.minimum ?? "medium",
-    minimumConfidence: decoded.minimumConfidence ?? 0.7,
-    paths: decoded.paths ?? [],
-    rules: decoded.rules ?? defaultRules
-  } satisfies ReviewConfig
+  return { source, decoded }
+})
+
+export const loadConfig = Effect.fn("Review.loadConfig")(function*(root: string, explicit?: string) {
+  const { source, decoded } = yield* readRepositoryConfig(root, explicit)
+  const organization = decoded.organization === undefined ? null : yield* loadOrganization(root, decoded.organization)
+  const policy = yield* Effect.try({
+    try: () => resolvePolicy(decoded, source, organization),
+    catch: (error) => error instanceof ReviewError ? error : new ReviewError({ code: "config_error", message: String(error) })
+  })
+  const knowledge = yield* readRepositoryKnowledge(root, decoded.knowledge ?? [])
+  return { ...policy, knowledge: [...policy.knowledge, ...knowledge] } satisfies ReviewConfig
 })
 
 export const skillsForPath = (file: string, config: ReviewConfig): ReadonlyArray<Skill> => {
   const matches = config.paths.filter(({ pattern }) => picomatch.isMatch(file, pattern, { dot: true }))
   if (matches.length === 0) return config.skills
-  return config.skills.filter((skill) => matches.some((rule) => rule.skills.includes(skill)))
+  return config.skills.filter((skill) => config.requiredSkills.includes(skill) || matches.some((rule) => rule.skills.includes(skill)))
 }

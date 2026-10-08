@@ -4,8 +4,14 @@
   "private": true,
   "description": "A code review skill and deterministic CLI for coding agents.",
   "type": "module",
-  "bin": { "review": "dist/main.js" },
-  "files": ["dist", ".agents/skills/review", "README.md"],
+  "bin": {
+    "review": "dist/main.js"
+  },
+  "files": [
+    "dist",
+    ".agents/skills/review",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -13,11 +19,14 @@
     "review": "tsx src/main.ts",
     "prepack": "npm run build"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22.20.0"
+  },
   "dependencies": {
     "@effect/platform-node": "4.0.2",
     "effect": "4.0.2",
     "picomatch": "4.0.7",
+    "skills": "1.7.1",
     "yaml": "2.9.1"
   },
   "devDependencies": {

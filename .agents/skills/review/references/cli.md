@@ -13,7 +13,7 @@ JSON is the default output. `--format text` produces a readable summary. Both co
 
 The default commit range is `HEAD~1` to `HEAD`; the default worktree base is `HEAD`. The context contains resolved commit hashes, changed files, patches, line counts, changed lines, permitted correctness/security lenses, and repository rules. Commit source comes from Git. Worktree source is the current on-disk content, including staged, unstaged, and untracked files that Git does not ignore.
 
-Config is read from the current working tree. Path globs match repository-relative paths using forward slashes. Matching rules combine their permitted lenses, intersected with the global `skills` list; unmatched paths use that global list. An empty list permits no lenses. `--config` selects a config relative to the repository root, or accepts an absolute path.
+Config and repository knowledge are read from the current working tree. Organization knowledge is read from the exact cached revision in `.review/knowledge.lock.json`. Context returns resolved policy and knowledge documents, including their scope. Path globs match repository-relative paths using forward slashes. Matching rules combine their permitted lenses, intersected with the global `skills` list; unmatched paths use that global list. Organization-required lenses always apply; an empty list disables only optional lenses. `--config` selects a config relative to the repository root, or accepts an absolute path.
 
 ## Draft findings
 
@@ -58,6 +58,8 @@ Use the same policy and Git range as `context`. Commit hashes prevent branch mov
 Report the resolved base and head, accepted findings, and rejected count. Keep the coding agent's judgment separate from mechanical validation: exact evidence and sufficient confidence do not by themselves prove a bug.
 
 The skill also requires an overall **Confidence: N/5** with a rationale. This is confidence that the reviewed change is safe to merge, and follows the rubric in [SKILL.md](../SKILL.md#overall-confidence). Keep it in the Markdown report; the JSON finding field `confidence` remains a number from 0 to 1.
+
+When organization knowledge is configured, include the source and organization revision from the check report. Read [knowledge.md](knowledge.md) for inheritance and cache failures. Setup and sync are onboarding/update operations, separate from the read-only review workflow.
 
 ## GitHub PR workflow
 

@@ -268,6 +268,7 @@ test("publish uses repository policy and supports explicit reviewed commits and 
 test("comment rendering preserves code fences and encodes unusual source paths", () => {
   const body = renderComment({
     formatVersion: 1, repository: "/local", range: { base: "a".repeat(40), head: "b".repeat(40), worktree: false },
+    organization: { version: 1, source: "https://example.com/private-knowledge.git", ref: "main", revision: "c".repeat(40) },
     summary: { accepted: 1, rejected: 0 }, rejected: [],
     accepted: [{ ...draft, file: "a (b)#.ts", title: "Title\n## <script>", quote: "```\ncode\n```", suggestedFix: "Keep the original value." }]
   }, "example/project")
@@ -275,4 +276,6 @@ test("comment rendering preserves code fences and encodes unusual source paths",
   assert.ok(body.includes("````\n```\ncode\n```\n````"))
   assert.ok(!body.includes("\n## <script>"))
   assert.match(body, /Suggested fix: Keep the original value/)
+  assert.ok(body.includes(`Organization knowledge revision: \`${"c".repeat(40)}\``))
+  assert.ok(!body.includes("private-knowledge"))
 })

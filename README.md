@@ -4,13 +4,14 @@ A code review skill and an Effect TypeScript CLI for coding agents. The skill gu
 
 ## Install
 
-Requires Node.js 22 or newer and Git. From a local checkout of this repository:
+Requires Node.js 22.20 or newer and Git. From a local checkout of this repository:
 
 ```sh
 npm ci
 npm run build
 npm install --global .
 review --help
+review setup
 ```
 
 You can also run it from the checkout without a global install:
@@ -19,15 +20,17 @@ You can also run it from the checkout without a global install:
 npm run review -- context --repo /path/to/project
 ```
 
-The package is built for local installation; it has not been published to a registry.
+The package is built for local installation; it has not been published to a registry. If your global npm directory is not writable, install with `npm install --global --prefix "$HOME/.local" .` and put `$HOME/.local/bin` on your PATH.
 
 ## Use it with a coding agent
 
 The skill is [`.agents/skills/review/SKILL.md`](.agents/skills/review/SKILL.md).
 
-Copy that folder into the project you want reviewed, at `.agents/skills/review/`, or point your coding agent at the file. Ask the coding agent to load the skill and follow its instructions to review a change, a commit, a branch, or a pull request.
+Run `review setup` to install the bundled skill for your coding agents across projects. Setup delegates agent detection and selection to the bundled [Vercel skills installer](https://github.com/vercel-labs/skills). Use `review setup --project` inside a Git repository for project installation. For unattended setup, pass `--yes` and explicit `--agent` IDs (repeat the flag for multiple agents). The skill and reference files come from the installed CLI release; rerun setup after upgrading it.
 
-The coding agent runs `review context`, reads the changed code and related callers and tests, and writes findings as JSON. It then runs `review check` and reports the accepted findings. For a GitHub PR review, it also runs `review publish` to share findings and useful context unless you ask for a local-only review. The skill includes [command and finding format guidance](.agents/skills/review/references/cli.md).
+You can also copy the skill folder into `.agents/skills/review/` or point a coding agent directly at it. Ask the coding agent to load the skill and follow its instructions to review a change, a commit, a branch, or a pull request.
+
+The coding agent runs `review context`, reads the changed code and related callers and tests, and writes findings as JSON. It then runs `review check` and reports the accepted findings. For GitHub PR reviews, it also runs `review publish` unless you ask for a local-only review. The skill includes [command and finding format guidance](.agents/skills/review/references/cli.md).
 
 Every review includes **Confidence: N/5** and a brief explanation of confidence that the change is safe to merge. Each PR review also includes a Mermaid diagram of its changed components and architecture, even if no findings clear the reporting threshold. The coding agent chooses the score and traces the diagram from the reviewed code; the CLI posts them as Markdown context. Individual finding confidence remains on the 0–1 scale.
 
@@ -95,7 +98,7 @@ The result contains `accepted`, `rejected` with original draft indices and rejec
 
 Exit codes: **0** means all drafts passed, including an empty list; **1** means at least one draft was rejected; **2** means an input, configuration, or command error prevented validation. Operational errors go to stderr. Finding acceptance establishes evidence and policy compliance; the coding agent still determines whether the behavior is a real defect.
 
-The CLI reads the reviewed repository without modifying its files. It excludes source findings on deleted files, binaries, symlinks, and submodules, and disables external Git diff and text conversion drivers.
+`context` and `check` read the reviewed repository without modifying it or fetching remote knowledge. They exclude source findings on deleted files, binaries, symlinks, and submodules, and disable external Git diff and text conversion drivers. `setup` and `sync` explicitly manage installation, configuration, and knowledge locks.
 
 ## GitHub publishing
 
@@ -117,7 +120,7 @@ review publish /tmp/findings.json \
   --context-file /tmp/review-context.md
 ```
 
-The comment is headed **AI-generated review** and identifies the **review skill and CLI automated reviewer**. GitHub displays the signed-in account as the uploader; the comment explicitly identifies AI authorship. It includes validated findings, source links, the reviewed commits, and Markdown context containing the overall confidence score, rationale, and a Mermaid diagram of the PR's changes. Relevant checks and verified behavior can accompany that context. Rejected drafts are counted but their contents are omitted.
+The comment is headed **AI-generated review** and identifies the **review skill and CLI automated reviewer**. GitHub displays the signed-in account as the uploader; the comment explicitly identifies AI authorship. It includes validated findings, source links, the reviewed commits, the organization knowledge revision when configured, and Markdown context containing the overall confidence score, rationale, and a Mermaid diagram of the PR's changes. Relevant checks and verified behavior can accompany that context. Rejected drafts are counted but their contents are omitted.
 
 Each account maintains one marked review comment per PR. Subsequent runs update that comment; identical content is left unchanged. Human comments and other authors' comments are untouched. Publication verifies the reviewed range belongs to the PR and rechecks PR metadata immediately before writing. Publish sequentially: concurrent runs can race, and the metadata check and write are not atomic. The comment records its exact reviewed commit.
 
@@ -142,9 +145,57 @@ rules:
   - Prefer repository evidence over assumptions.
 ```
 
-Patterns match repository-relative paths with forward slashes: `api/**` covers `api/v1/auth.ts`, while `*.ts` only covers files at the root. Matching path rules combine their lenses and are restricted by the global `skills` list. Unmatched paths use the global list. An empty lens list disables those checks. Defaults are correctness and security, minimum severity `medium`, and minimum confidence `0.7`.
+Patterns match repository-relative paths with forward slashes: `api/**` covers `api/v1/auth.ts`, while `*.ts` only covers files at the root. Matching path rules combine their lenses and are restricted by the global `skills` list. Unmatched paths use the global list. An empty lens list disables optional checks; organization-required lenses still apply. Defaults are correctness and security, minimum severity `medium`, and minimum confidence `0.7`.
 
 Configuration is read from the current working tree, including for commit reviews. If multiple config files exist, choose one with `--config review.yaml`. A relative config path resolves from the repository root; a findings input path resolves from the shell's current directory. Invalid config fails the command rather than silently using defaults. Free-text rules guide the coding agent's judgment.
+
+## Shared knowledge
+
+Keep repository knowledge with the code and organization knowledge in a dedicated Git repository. For example, a project can declare:
+
+```yaml
+organization:
+  source: https://github.com/your-org/engineering-knowledge.git
+  ref: main
+knowledge:
+  - docs/architecture.md
+  - docs/testing.md
+```
+
+The organization repository has its own `review.yaml` manifest:
+
+```yaml
+defaults:
+  skills: [correctness, security]
+  minimumConfidence: 0.8
+required:
+  skills: [security]
+  minimumSeverity: medium
+  minimumConfidence: 0.75
+  rules:
+    - Never expose credentials in logs.
+knowledge:
+  - knowledge/engineering.md
+```
+
+Repo settings override organization defaults field by field. Required lenses always apply, including to paths that narrow optional checks. Repo thresholds or global lens settings that weaken declared requirements are configuration errors. Required free-text rules are retained when repo rules replace defaults; the coding agent evaluates those rules.
+
+```sh
+# Connect a project and install its review skill.
+review setup --organization https://github.com/your-org/engineering-knowledge.git --ref main
+
+# Populate a new machine's cache using the project's committed lock.
+review sync
+
+# Explicitly adopt a newer approved organization revision.
+review sync --update
+```
+
+Commit `review.yaml`, repo knowledge docs, and `.review/knowledge.lock.json` with the project. Initial sync creates the lock. Subsequent syncs restore that exact revision; `--update` resolves the configured ref again and changes the lock after validating the new policy. Failed updates preserve the previous lock. Setup can run from outside Git to install a user-wide skill; connecting organization knowledge requires a project. `--skip-skills` configures/syncs knowledge without installing the skill.
+
+Knowledge is cached outside the project, in `$XDG_CACHE_HOME/review` or `~/.cache/review` on Unix and the local app-data directory on Windows; `REVIEW_CACHE_DIR` overrides it. Private repositories use Git's existing authentication. Review commands use the locked cache offline and report an actionable error if it is missing. Context includes both scopes' document contents and the organization revision; check reports identify that revision too.
+
+Knowledge changes follow the normal Git review process. Agents can propose additions, and approved commits become shared knowledge. The CLI reads declared Markdown files and never executes organization code. See the [knowledge reference](.agents/skills/review/references/knowledge.md) for schemas, limits, and update behavior.
 
 ## Develop
 
@@ -155,7 +206,7 @@ npm test
 npm run build
 ```
 
-The integration tests run the built executable against temporary repositories. Publishing tests use a fake `gh` executable to verify API calls without posting live comments. `npm pack` builds an installable archive containing the CLI and skill.
+The integration tests run the built executable against temporary repositories and isolated home directories. Publishing tests use a fake `gh` executable to verify API calls without posting live comments. `npm pack` builds an installable archive containing the CLI and skill.
 
 ## Stamp a PR
 

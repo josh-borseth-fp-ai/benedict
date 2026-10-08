@@ -84,6 +84,7 @@ export const checkFindings = Effect.fn("Review.checkFindings")(function*(snapsho
     formatVersion: 1,
     repository: context.repository,
     range: context.range,
+    organization: context.config.organization,
     accepted,
     rejected,
     summary: { accepted: accepted.length, rejected: rejected.length }
