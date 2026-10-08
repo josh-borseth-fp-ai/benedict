@@ -1,7 +1,15 @@
-# Review skill
+# Review
 
-A T3 session reviews a local git diff by following [`.agents/skills/review/SKILL.md`](.agents/skills/review/SKILL.md). The session reads the change and reports defects in correctness and security.
+A skill an agent can call to review a local git diff. Cursor, Codex, Claude, T3, or any other agent that can read a skill can use it. The agent reads the change and reports real defects in correctness and security.
 
-Use this repository as the project, or copy `.agents/skills/review/` into the project you want reviewed.
+## Use it
 
-Optional `review.yaml`, `review.yml`, or `review.json` in that project chooses which skills apply to which paths and sets the severity and confidence floor. The skill describes the file.
+The skill is [`.agents/skills/review/SKILL.md`](.agents/skills/review/SKILL.md).
+
+Copy that folder into the project you want reviewed, at `.agents/skills/review/`, or point the agent at the file. Then ask it to review a change, a commit, a branch, or a pull request.
+
+The agent diffs the range, reads the changed code and the nearby callers and tests, and reports findings that quote the repository. It skips style, binary files, and guesses.
+
+## Optional config
+
+A `review.yaml`, `review.yml`, or `review.json` in that project chooses which checks apply to which paths and sets the severity and confidence floor. The skill describes the file.

@@ -1,15 +1,15 @@
 # Plan
 
-T3 Code starts the agent. `.agents/skills/review/SKILL.md` is the review.
+`.agents/skills/review/SKILL.md` is the review. Whatever agent is already running calls the skill.
 
 ## Trust boundary
 
-Do not launch a second coding agent. Do not read provider credentials. The session T3 already opened reads the diff and reports findings.
+The current agent reads the diff and reports findings. Do not launch a second agent. Do not read provider credentials.
 
 ## Pipeline
 
 ```
-T3 session follows the review skill
+The agent follows the review skill
   → diff, related code, applicable skills
   → drop drafts that miss the bar
   → report
