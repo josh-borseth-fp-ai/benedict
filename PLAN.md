@@ -1,26 +1,42 @@
 # Plan
 
-`.agents/skills/review/SKILL.md` is the review. Whatever agent is already running calls the skill.
+Build a portable review skill backed by a deterministic Effect TypeScript CLI. Any coding agent can follow the skill and run the commands.
 
-## Trust boundary
+## Responsibilities
 
-The current agent reads the diff and reports findings. Do not launch a second agent. Do not read provider credentials.
+The skill guides investigation: read the change, trace related code, apply correctness and security, and establish whether a suspected defect is real. It also assesses merge confidence on a five-point scale and diagrams the affected architecture for each PR. Individual finding confidence remains on the 0–1 scale.
+
+`review context` resolves a Git range and returns changed files, patches, line counts, changed lines, applicable lenses, and repository rules. Commit reviews use source from Git; worktree reviews include staged, unstaged, and untracked files.
+
+`review check` validates finding structure, diff membership, file type, source line ranges, quoted evidence, permitted lenses, severity and confidence thresholds, and duplicate findings. It returns accepted findings and rejected drafts with reasons.
+
+`review publish` reuses that validator, renders a fixed AI attribution, verifies the PR range, and creates or updates an owned automation comment through GitHub CLI. The skill selects useful findings and context; deterministic code owns formatting, destination checks, and API operations.
 
 ## Pipeline
 
 ```
-The agent follows the review skill
-  → diff, related code, applicable skills
-  → drop drafts that miss the bar
-  → report
+Coding agent loads the skill
+  → review context
+  → investigate changed and related code
+  → write draft findings
+  → review check
+  → report accepted findings, dropped draft count, and overall confidence out of five
+  → for a PR, diagram its changed architecture and write score, rationale, and Mermaid to Markdown context
+  → review publish for GitHub PR reviews, unless local-only
 ```
 
-A reported finding has a file in the diff, a line range inside that file, a severity, a skill, a title, an explanation, a quote, and a confidence. The skill drops drafts that are style-only, outside the diff, on a binary file, for a skill the path does not allow, missing a quote or explanation, below the severity or confidence floor, or duplicates.
+## Boundaries
 
-## Skills
+The existing coding agent owns investigation and judgment. The CLI reads the repository, runs Git, checks mechanical constraints, and publishes PR conversation comments through `gh`. GitHub authentication stays with `gh`. The CLI does not launch another agent, handle provider credentials, or modify reviewed files. Passing validation does not prove that a finding describes a real bug.
 
-v0 is one skill with two lenses: correctness and security. Path rules in `review.yaml` decide which lens applies. Later lenses stay conditional: database checks for migrations, API checks for public schemas, concurrency checks for shared state.
+## First slice
 
-## Out of scope
+- Local installation and commands for context and finding validation.
+- JSON output for coding agents and text output for people.
+- Repository configuration for correctness and security, path rules, and thresholds.
+- Integration tests against temporary Git repositories.
+- Skill instructions and a finding format reference.
 
-A review command, hosted SaaS, choosing or proxying a model, credential handling, autonomous edits, and a vector database.
+## Later
+
+Add targeted retrieval or additional conditional review lenses when real reviews demonstrate a need. Keep hosted services, provider orchestration, autonomous edits, and a vector database outside the project scope.
