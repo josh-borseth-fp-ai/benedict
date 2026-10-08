@@ -115,31 +115,20 @@ Use `--dry-run --format text` when you need to inspect the exact comment. Report
 
 ## Stamp
 
-Only stamp when the user asks you to review and stamp a GitHub pull request. A stamp asks the team's stamp bot in Microsoft Teams to approve the PR, so it is outward-facing.
+Only stamp when the user asks you to review and stamp a GitHub PR. A stamp directly submits a GitHub approval through the shared, opted-in reviewer pool. It is outward-facing and carries AI attribution.
 
-1. Run `gh pr view <pr> --json url,number,headRefOid,baseRefName`. Fetch the base branch and the PR head. Review from `git merge-base origin/<baseRefName> <headRefOid>` to `headRefOid`, the whole PR. Do not include uncommitted changes.
-2. Review and report as above. Run `review check` with the resolved whole-PR range. Build the stamp report from its `accepted` findings and `summary.rejected` count; do not stamp from unchecked drafts.
-3. Write the surviving findings to a JSON file outside the repository, such as one from `mktemp`:
+Review the whole current PR from its merge base through its head, publish the review as above, then run:
 
-   ```json
-   {
-     "version": 1,
-     "pr": "https://github.com/ORG/REPO/pull/123",
-     "base": "<full merge-base sha>",
-     "head": "<full PR head sha>",
-     "skills": ["correctness", "security"],
-     "findings": [
-       { "severity": "high", "skill": "security", "file": "api/user.ts",
-         "startLine": 10, "endLine": 14, "title": "…", "confidence": 0.9,
-         "explanation": "…", "quote": "…" }
-     ],
-     "dropped": 3
-   }
-   ```
+```sh
+review stamp approve /tmp/findings.json --repo /path/to/repository \
+  --pr https://github.com/ORG/REPO/pull/123 \
+  --base <resolved-merge-base> --head <reviewed-head>
+```
 
-4. Run `node .agents/skills/review/scripts/stamp.ts check --report <file>`. Exit 1 means it refused: tell the user its `reasons` and stop. Exit 2 means an error: tell the user and stop.
-5. On exit 0, send its `teams.message` to its `teams.team` and `teams.channel` with the Teams MCP `send_channel_message` tool, `format` `text`. Find the IDs with `list_teams` and `list_channels`. Send the message exactly as printed and nothing else. If the Teams MCP is not available, tell the user to set it up and stop.
-6. Run `node .agents/skills/review/scripts/stamp.ts comment --report <file>`. It checks again and comments on the PR as the signed-in `gh` user.
-7. Tell the user the PR was stamped, or what stopped it.
+Pass the original draft findings and the same resolved hashes/config used by `context` and `check`. The CLI revalidates findings and requires no accepted findings. It reads stamp authorization, the service endpoint, protected paths and the size limit from the PR's base commit. `--dry-run` previews the request without contacting the stamp service.
 
-Never stamp any other way. Do not approve the PR yourself.
+The base branch must configure `stamp.enabled` and `stamp.service`, and the user must have configured `REVIEW_STAMP_URL` and `REVIEW_STAMP_KEY` for the service. The trusted local URL must match the base config before the CLI sends the key. The CLI owns authentication; do not print or inspect the key. See [references/stamp.md](references/stamp.md) for setup, outputs and failure handling.
+
+The service independently checks the current whole-PR range, base-branch stamp policy and repository allowlist. It excludes the PR author and submits the approval as an opted-in GitHub reviewer, with the exact reviewed commit and Review Agent attribution. No Teams connection or local MCP is needed.
+
+Report the returned approval URL and approving account. If refused or the request fails, report the reason and stop. An uncertain write is not automatically retried; inspect GitHub before another attempt. Never use a direct `gh pr review --approve` call to bypass this workflow.

@@ -46,13 +46,12 @@ The existing coding agent owns investigation and judgment. Review commands read 
 
 ## Later
 
-Add targeted retrieval or additional conditional review lenses when real reviews demonstrate a need. Keep hosted services, provider orchestration, autonomous edits, and a vector database outside the project scope.
+Add targeted retrieval or additional conditional review lenses when real reviews demonstrate a need. Keep provider orchestration, autonomous edits, and a vector database outside the project scope. The stamp service below is the shared approval component.
 
 ## Stamp
 
-The stamp bot in Teams approves a PR when someone posts `stamp <url>` in its channel. The review agent can post that for a clean PR.
+`review stamp approve` validates the original findings against the resolved whole-PR range, checks the current head, and reads stamp authorization and the service endpoint from the base commit. It calls the shared service with the reviewed base/head and zero accepted findings.
 
-- `scripts/stamp.ts` decides, not the model. It checks the PR is open and current, the review covered the whole PR, there are no findings, no protected path changed, and the PR is under the line limit. It reads those rules from the base branch.
-- Posting goes out as the developer. Teams uses [`@floriscornel/teams-mcp`](https://github.com/floriscornel/teams-mcp), which runs locally and signs in with the developer's Microsoft account. GitHub uses `gh`. There is no separate bot or service account.
-- The Teams message and a PR comment carry the 🤖 Review Agent attribution. A hidden marker in the comment stops a second stamp for the same head commit.
-- `yaml` reads `review.yaml`; `picomatch` uses the same deny-path glob semantics as the review CLI.
+`src/stamp*.ts` adapts the GitHub reviewer pool from ForwardPathAI/fp-git-helper into an Effect HTTP service with Azure Table storage. `review stamp serve` runs the service. Reviewers explicitly enroll through `review stamp enroll` and GitHub device authorization; administration uses `users` and `remove`. There is no project frontend or Python runtime. The service excludes the author, verifies current metadata and base-branch policy through GitHub, reserves the PR/head pair, and submits an AI-attributed approval at that commit. Only explicit GitHub refusals permit another candidate; uncertain writes stop for inspection. `stamp-service/` contains deployment documentation and source attribution.
+
+The organization deploys the service and configures its repository allowlist. Developers configure a stamp endpoint key; Teams and local MCPs are not required. The existing review agent still owns investigation; the service does not launch another model.
