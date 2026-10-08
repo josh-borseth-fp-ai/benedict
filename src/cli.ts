@@ -8,6 +8,9 @@ import { GitHub } from "./github.js"
 import { publishReview } from "./publish.js"
 import type { CheckReport, ReviewContext, ReviewOptions } from "./model.js"
 import { setup } from "./setup.js"
+import { stampReview } from "./stamp.js"
+import { enrollReviewer, listReviewers, removeReviewer } from "./stamp-client.js"
+import { serveStamp } from "./stamp-server.js"
 import { repositoryRoot, syncOrganization } from "./sync.js"
 
 const rangeFlags = {
@@ -122,9 +125,58 @@ const publishCommand = Command.make("publish", {
   yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : `${result.action}: ${result.commentUrl ?? result.pr}\n\n${result.body}`)
 })).pipe(Command.withDescription("Publish validated findings and context as an AI-labeled PR comment via gh."))
 
+const stampApproveCommand = Command.make("approve", {
+  repo: rangeFlags.repo,
+  base: Flag.String("base").pipe(Flag.withDescription("Resolved whole-PR merge base that was reviewed")),
+  head: Flag.String("head").pipe(Flag.withDescription("Resolved PR head that was reviewed")),
+  config: rangeFlags.config,
+  format: rangeFlags.format,
+  findings: Argument.String("findings").pipe(Argument.withDescription("Draft findings JSON; checked again before stamping")),
+  pr: Flag.String("pr").pipe(Flag.withDescription("Full GitHub PR URL")),
+  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Check and preview the request without calling the stamp service"))
+}, Effect.fn(function*(flags) {
+  const result = yield* stampReview({
+    repo: flags.repo, base: flags.base, head: flags.head,
+    config: Option.getOrUndefined(flags.config), findings: flags.findings,
+    pr: flags.pr, dryRun: flags.dryRun
+  })
+  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) :
+    `${result.action}: ${result.reviewUrl ?? result.pr}\nReviewed head: ${result.head}`)
+})).pipe(Command.withDescription("Stamp a clean whole-PR review through the shared GitHub reviewer service."))
+
+const stampEnrollCommand = Command.make("enroll", {
+  yes: Flag.Boolean("yes").pipe(Flag.withDefault(false), Flag.withDescription("Explicitly opt in to automated approvals without the local confirmation prompt")),
+  format: rangeFlags.format
+}, Effect.fn(function*(flags) {
+  const result = yield* enrollReviewer(flags.yes)
+  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) :
+    result.action === "cancelled" ? "Enrollment cancelled." : `Enrolled GitHub reviewer: ${result.username}`)
+})).pipe(Command.withDescription("Enroll a consenting reviewer using GitHub device authorization."))
+const stampUsersCommand = Command.make("users", { format: rangeFlags.format }, Effect.fn(function*(flags) {
+  const result = yield* listReviewers()
+  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : result.users.map(user => `${user.username} (${user.id})`).join("\n"))
+})).pipe(Command.withDescription("List enrolled reviewer identities (administrator key required)."))
+const stampRemoveCommand = Command.make("remove", {
+  username: Argument.String("username"), format: rangeFlags.format
+}, Effect.fn(function*(flags) {
+  const result = yield* removeReviewer(flags.username)
+  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : `Removed reviewer: ${result.removed}`)
+})).pipe(Command.withDescription("Remove a reviewer's enrollment (administrator key required)."))
+const stampServeCommand = Command.make("serve", {
+  host: Flag.String("host").pipe(Flag.withDefault("127.0.0.1")),
+  port: Flag.Int("port").pipe(Flag.withDefault(8080))
+}, Effect.fn(function*(flags) {
+  if (flags.port < 1 || flags.port > 65535) return yield* Effect.fail(new Error("--port must be between 1 and 65535."))
+  yield* serveStamp(flags.host, flags.port)
+})).pipe(Command.withDescription("Run the Effect HTTP stamp service with shared Azure Table storage."))
+const stampCommand = Command.make("stamp").pipe(
+  Command.withDescription("Approve reviewed PRs and manage the shared GitHub reviewer pool."),
+  Command.withSubcommands([stampApproveCommand, stampEnrollCommand, stampUsersCommand, stampRemoveCommand, stampServeCommand])
+)
+
 export const reviewCommand = Command.make("review").pipe(
   Command.withDescription("Deterministic review tools for coding agents."),
-  Command.withSubcommands([contextCommand, checkCommand, publishCommand, syncCommand, setupCommand])
+  Command.withSubcommands([contextCommand, checkCommand, publishCommand, stampCommand, syncCommand, setupCommand])
 )
 
 export const run = Command.run(reviewCommand, { version: "0.1.0" }).pipe(

@@ -210,64 +210,40 @@ The integration tests run the built executable against temporary repositories an
 
 ## Stamp a PR
 
-When asked to review and stamp a GitHub PR, the agent reviews the whole PR. If nothing clears the bar, it posts `stamp <PR link>` to the team's Teams stamp channel, and the stamp bot approves the PR. The message and a PR comment say the request came from the review agent, not a manual stamp. Both are posted as you: Teams through your Teams MCP sign-in, GitHub through your `gh` sign-in.
+Ask the agent to **review and stamp** a PR. After the whole-PR review and publication, it runs:
 
-`scripts/stamp.ts` decides whether a stamp is allowed, so the model does not. It refuses when any of these are true:
+```sh
+review stamp approve /tmp/findings.json --repo /path/to/project \
+  --pr https://github.com/ORG/REPO/pull/123 \
+  --base <reviewed-merge-base> --head <reviewed-head>
+```
 
-- Stamping is off in the base branch's review config, or no Teams channel is set.
-- The PR is closed or a draft.
-- The review did not cover the PR's current head, from its merge base.
-- The review reported a finding.
-- The PR changes the review config, the review skill, or a `denyPaths` glob.
-- The PR changes more lines than `maxChangedLines`.
-- The review agent already stamped this head commit.
+`review stamp approve` checks the original findings again, requires zero accepted findings, verifies the current whole-PR range, and reads stamping settings from the base branch. It then calls the shared stamp service directly. `--dry-run` validates and previews without calling that service.
 
-It reads the config from the base branch, so a PR cannot loosen its own rules.
+```yaml
+stamp:
+  enabled: true
+  service: https://review.example.com/api/stamp
+  denyPaths:
+    - "infra/**"
+    - ".github/workflows/**"
+  maxChangedLines: 400
+```
 
-### Setup
+Set the trusted endpoint as `REVIEW_STAMP_URL` and its approval key as `REVIEW_STAMP_KEY` through your normal local configuration. The CLI sends the key in a header and never includes it in its report. The base branch's `stamp.service` must match the locally trusted URL before any key is sent. Review policy settings and the authorized service URL belong on the base branch, so a PR cannot enable its own stamping.
 
-1. Install the script's dependencies, [`yaml`](https://github.com/eemeli/yaml) and `picomatch`. It needs Node 22.18 or later.
+The [stamp service](stamp-service/README.md) rewrites the shared reviewer pool and approval behavior from [ForwardPathAI/fp-git-helper](https://github.com/ForwardPathAI/fp-git-helper) in Effect TypeScript. Run it once with `review stamp serve` behind HTTPS. Reviewers opt in with `review stamp enroll`, then authorize the displayed device code on GitHub. Administrators use `review stamp users` and `review stamp remove USERNAME`. Enrollment and administration have separate keys; setup is documented in the service guide. No custom frontend, Python, Teams connection or local MCP setup is required.
 
-   ```sh
-   npm install --prefix .agents/skills/review
-   ```
+The service excludes the PR author, chooses another eligible account, submits an approval at the reviewed commit, and labels that approval **Review Agent — automated approval**. Developers need the existing review CLI and the approval key.
 
-2. Sign in to GitHub with `gh auth login`.
-3. Add [`@floriscornel/teams-mcp`](https://github.com/floriscornel/teams-mcp) to your agent and sign in with your Microsoft account:
+The CLI and service refuse closed/draft PRs, stale or partial reviews, accepted findings, protected paths and changes over the size limit. Config files, the review skill and service code are protected by default. Binary or unavailable text patches require manual review. The service also enforces an administrator-configured repository allowlist and reserves each PR/head pair so concurrent requests cannot submit duplicate approvals. It tries another account only after an explicit GitHub refusal. An uncertain write leaves a pending reservation for inspection instead of retrying.
 
-   ```json
-   {
-     "mcpServers": {
-       "teams-mcp": { "command": "npx", "args": ["-y", "@floriscornel/teams-mcp@latest"] }
-     }
-   }
-   ```
+GitHub still displays the opted-in account as the reviewer. The approval body identifies the automated review and its commits. Whether that approval satisfies branch requirements depends on the account's permissions and repository rules. Enable dismissal of stale approvals in the repository's branch rules.
 
-   ```sh
-   npx @floriscornel/teams-mcp@latest authenticate
-   ```
+The previous Teams scripts are replaced by this CLI command. Old `stamp.team` and `stamp.channel` fields remain parseable for existing configs, but stamping now requires `stamp.service`. Mechanical validation cannot prove the AI's defect assessment; the approval still depends on the completed review.
 
-   Sending channel messages needs the `ChannelMessage.Send` permission. If sign-in shows "Need admin approval", a Microsoft 365 admin has to grant consent once. The Teams MCP README explains how.
+Service tests are part of `npm test`, and can also be run with:
 
-4. Turn stamping on in the project's review config, on its default branch:
-
-   ```yaml
-   stamp:
-     enabled: true
-     team: Engineering        # Teams team name
-     channel: stamp           # stamp channel name
-     denyPaths:               # never stamp PRs that touch these
-       - "infra/**"
-       - ".github/workflows/**"
-     maxChangedLines: 400     # default 400
-   ```
-
-5. In GitHub branch rules, turn on "Dismiss stale pull request approvals". Otherwise commits pushed after a stamp keep the approval.
-
-Then ask the agent to "review and stamp" a PR link.
-
-### Limits
-
-- The rules check the review's scope, not the model's judgment. A PR that manipulates the agent into reporting nothing could still be stamped. `denyPaths` and `maxChangedLines` limit how much that can matter.
-- The Teams post is a tool call the agent makes after the script says yes. The skill tells it never to post any other way, but nothing outside the agent enforces that.
-- The approval comes from whichever person the stamp bot picks. The 🤖 text in Teams and the PR comment are what show it was automated.
+```sh
+node --import tsx --test tests/stamp-service.test.ts
+```
