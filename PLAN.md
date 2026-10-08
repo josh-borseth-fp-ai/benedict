@@ -4,7 +4,7 @@ Build a portable review skill backed by a deterministic Effect TypeScript CLI. A
 
 ## Responsibilities
 
-The skill guides investigation: read the change, trace related code, apply correctness and security, and establish whether a suspected defect is real.
+The skill guides investigation: read the change, trace related code, apply correctness and security, and establish whether a suspected defect is real. It also assesses merge confidence on a five-point scale and diagrams the affected architecture for each PR. Individual finding confidence remains on the 0–1 scale.
 
 `review context` resolves a Git range and returns changed files, patches, line counts, changed lines, applicable lenses, and repository rules. Commit reviews use source from Git; worktree reviews include staged, unstaged, and untracked files.
 
@@ -20,7 +20,8 @@ Coding agent loads the skill
   → investigate changed and related code
   → write draft findings
   → review check
-  → report accepted findings and dropped draft count
+  → report accepted findings, dropped draft count, and overall confidence out of five
+  → for a PR, diagram its changed architecture and write score, rationale, and Mermaid to Markdown context
   → review publish for GitHub PR reviews, unless local-only
 ```
 

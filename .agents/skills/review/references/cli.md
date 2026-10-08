@@ -57,6 +57,8 @@ Use the same policy and Git range as `context`. Commit hashes prevent branch mov
 
 Report the resolved base and head, accepted findings, and rejected count. Keep the coding agent's judgment separate from mechanical validation: exact evidence and sufficient confidence do not by themselves prove a bug.
 
+The skill also requires an overall **Confidence: N/5** with a rationale. This is confidence that the reviewed change is safe to merge, and follows the rubric in [SKILL.md](../SKILL.md#overall-confidence). Keep it in the Markdown report; the JSON finding field `confidence` remains a number from 0 to 1.
+
 ## GitHub PR workflow
 
 Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with access to the destination PR. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL. Obtain the PR's base and head hashes:
@@ -82,7 +84,11 @@ review publish /tmp/findings.json --repo /path/to/project \
   --context-file /tmp/review-context.md
 ```
 
-`publish` takes the original draft findings format, revalidates it, and posts only accepted findings plus the rejected count. `--context-file` is optional; its Markdown is included as AI review context. Files resolve from the shell's current directory. Config uses the same `--config` flag and repository-relative resolution as `check`. With no explicit range, the base is the PR merge base and the head is local `HEAD`. Publication rejects a head that differs from the current PR, and does not accept `--worktree`.
+`publish` takes the original draft findings format, revalidates it, and posts only accepted findings plus the rejected count. The CLI accepts `--context-file` as optional, but the skill requires it for PR publication. Write the overall **Confidence: N/5**, a brief rationale and verification gaps, and a fenced `mermaid` architecture diagram of the reviewed PR into that file, even when the findings array is empty. Follow the [diagram guidance](../SKILL.md#pr-architecture-diagram); derive the diagram from this PR's code and changes. Markdown and Mermaid fences are preserved in the PR comment. The CLI validates findings; the agent owns the score, diagram accuracy, and Mermaid syntax.
+
+Files resolve from the shell's current directory. Config uses the same `--config` flag and repository-relative resolution as `check`. With no explicit range, the base is the PR merge base and the head is local `HEAD`. Publication rejects a head that differs from the current PR, and does not accept `--worktree`.
+
+For meaningful UI changes, follow [UI evidence guidance](ui-evidence.md): check existing screenshots and focused video, request missing evidence from the implementation agent, and include the uploaded media URLs or evidence-comment link, demonstrated scenario, captured head, and any gaps in the context file. `publish` preserves Markdown links; it does not capture or upload media, and a local filesystem path will not become a GitHub attachment. Local-only reviews do not upload or publish evidence.
 
 Every comment starts with **AI-generated review** and identifies the review skill and CLI automated reviewer. GitHub still displays the signed-in account as the uploader. The comment includes resolved commits, accepted findings, severity, lens, confidence, source links, evidence, suggested fixes when present, and optional context. Rejected draft contents and local repository paths stay out of the comment.
 

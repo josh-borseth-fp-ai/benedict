@@ -29,6 +29,25 @@ Copy that folder into the project you want reviewed, at `.agents/skills/review/`
 
 The coding agent runs `review context`, reads the changed code and related callers and tests, and writes findings as JSON. It then runs `review check` and reports the accepted findings. For a GitHub PR review, it also runs `review publish` to share findings and useful context unless you ask for a local-only review. The skill includes [command and finding format guidance](.agents/skills/review/references/cli.md).
 
+Every review includes **Confidence: N/5** and a brief explanation of confidence that the change is safe to merge. Each PR review also includes a Mermaid diagram of its changed components and architecture, even if no findings clear the reporting threshold. The coding agent chooses the score and traces the diagram from the reviewed code; the CLI posts them as Markdown context. Individual finding confidence remains on the 0–1 scale.
+
+```mermaid
+flowchart LR
+    D["PR diff and related source"] --> S["Review skill"]
+    S --> F["Draft findings"]
+    F --> V["CLI finding validation"]
+    S --> C["Added steering: confidence out of five and PR architecture diagram"]
+    V --> P["review publish"]
+    C -->|"Markdown context"| P
+    P --> G["AI-generated PR review comment"]
+```
+
+This diagram shows how the review tool carries the new report content. The diagram generated for a reviewed PR describes that PR's own changes.
+
+For PRs with meaningful UI changes, the skill also checks screenshots and a focused video showing the changed screen and, when runnable, the interaction and result. The implementation agent captures and attaches this evidence when opening the PR; the reviewer reuses current evidence or requests what is missing. The [UI evidence workflow](.agents/skills/review/references/ui-evidence.md) uses browser/computer-use recording tools, keeps clips focused on the PR's purpose, and covers GitHub uploads and unavailable interactions. The reviewer remains read-only and does not spawn another agent.
+
+Uploaded evidence URLs, demonstrated behavior, captured commit, and verification gaps travel through `--context-file`. The CLI preserves those Markdown links but does not record video or upload files. Capture and upload require suitable tools; the installed GitHub CLI must support attachments or another supported uploader is needed. Local-only reviews retain local artifacts and make no GitHub writes. PRs without visible UI changes do not require media.
+
 ## Commands
 
 ```sh
@@ -98,11 +117,11 @@ review publish /tmp/findings.json \
   --context-file /tmp/review-context.md
 ```
 
-The comment is headed **AI-generated review** and identifies the **review skill and CLI automated reviewer**. GitHub displays the signed-in account as the uploader; the comment explicitly identifies AI authorship. It includes validated findings, source links, the reviewed commits, and optional Markdown context such as tests run or verified behavior. Rejected drafts are counted but their contents are omitted.
+The comment is headed **AI-generated review** and identifies the **review skill and CLI automated reviewer**. GitHub displays the signed-in account as the uploader; the comment explicitly identifies AI authorship. It includes validated findings, source links, the reviewed commits, and Markdown context containing the overall confidence score, rationale, and a Mermaid diagram of the PR's changes. Relevant checks and verified behavior can accompany that context. Rejected drafts are counted but their contents are omitted.
 
 Each account maintains one marked review comment per PR. Subsequent runs update that comment; identical content is left unchanged. Human comments and other authors' comments are untouched. Publication verifies the reviewed range belongs to the PR and rechecks PR metadata immediately before writing. Publish sequentially: concurrent runs can race, and the metadata check and write are not atomic. The comment records its exact reviewed commit.
 
-`--context-file` is optional. `publish` accepts draft findings in the same format as `check` and revalidates them. If omitted, the base defaults to the PR merge base and the head to local `HEAD`; those commits must be available locally. `--repo` and `--config` work as in `check`. Worktree findings must be reviewed again after committing before publication.
+The CLI keeps `--context-file` optional for direct callers; the skill requires it for PR reviews so the score and diagram are included. The CLI preserves this Markdown, and [GitHub renders fenced Mermaid blocks](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams). `publish` accepts draft findings in the same format as `check` and revalidates them. If omitted, the base defaults to the PR merge base and the head to local `HEAD`; those commits must be available locally. `--repo` and `--config` work as in `check`. Worktree findings must be reviewed again after committing before publication.
 
 `publish` returns the comment URL, exact body, counts, and action as JSON, or readable text with `--format text`. Exit 0 means publication or preview succeeded; exit 2 means it failed. It uses GitHub PR conversation comments. A lost write response may hide a successful post, so errors explain when to inspect the PR before retrying. Comments above 60,000 bytes fail for shortening. The CLI never automatically retries GitHub writes.
 
