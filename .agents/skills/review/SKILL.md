@@ -17,7 +17,9 @@ For a GitHub PR, obtain its current base and head commit hashes with `gh`, and r
 
 Run `review context --repo <repository>` with the selected range. Read [references/cli.md](references/cli.md) for flags and the finding JSON format. Use the returned patches and permitted lenses, and read source from the selected Git head for a commit review. Read each changed code file and related callers, callees, and tests when the diff is not enough to judge the change. Read `AGENTS.md`, `CLAUDE.md`, and `CODEOWNERS` when they exist. Skip binary files, deleted source, symlinks, and submodules.
 
-The CLI reads `review.yaml`, `review.yml`, or `review.json` from the repository root. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables those checks. Fix input or configuration errors before relying on a check result.
+The CLI reads `review.yaml`, `review.yml`, or `review.json` from the repository root. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables optional checks; organization-required lenses still apply. Fix input or configuration errors before relying on a check result.
+
+Read the `config.knowledge` documents returned by context. They identify repository and organization scope. Organization defaults can be overridden by repository settings; organization-required lenses, thresholds, and rules remain applicable. Include the organization revision in the report when present. See [references/knowledge.md](references/knowledge.md) when knowledge or policy resolution fails. A missing required lock/cache prevents validated review; do not silently omit organization guidance or use a different revision.
 
 ```yaml
 skills:
@@ -34,7 +36,7 @@ rules:
 minimumConfidence: 0.7
 ```
 
-`api/**` matches `api/v1/user.ts` and does not match `web/api/user.ts`. `*.ts` does not match `src/user.ts`. When several rules match, a skill applies only if the global `skills` list includes it and a matching rule lists it.
+`api/**` matches `api/v1/user.ts` and does not match `web/api/user.ts`. `*.ts` does not match `src/user.ts`. When several rules match, an optional lens applies only if the global `skills` list includes it and a matching rule lists it. Organization-required lenses apply regardless of path rules.
 
 ## Correctness
 
@@ -88,7 +90,7 @@ Prefer a simple `flowchart` or `sequenceDiagram` with quoted labels that GitHub 
 
 Write drafts to a JSON file outside the reviewed tree, then run `review check <findings.json>` using the resolved commit hashes returned by `context`, or the same base and `--worktree`. Report only the `accepted` findings and count rejected drafts. Exit code 1 means the report contains rejected drafts and is still usable; exit code 2 means validation failed. Rejection reasons may guide a correction, but keep thresholds and evidence requirements intact. A passing check establishes structural validity and source evidence; you must still verify the defect.
 
-If the CLI is unavailable, gather the range with Git and apply the checks below manually. State that deterministic validation was not run.
+If the CLI is unavailable, gather the range with Git and apply the checks below manually. State that deterministic validation was not run. When the repository declares organization knowledge, also disclose any unavailable organization guidance.
 
 Drop a draft when any of these are true:
 
