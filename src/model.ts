@@ -35,7 +35,14 @@ export const ConfigFile = Schema.Struct({
     skills: Schema.Array(Skill)
   }))),
   rules: Schema.optional(Schema.Array(NonBlank)),
-  minimumConfidence: Schema.optional(Confidence)
+  minimumConfidence: Schema.optional(Confidence),
+  stamp: Schema.optional(Schema.Struct({
+    enabled: Schema.optional(Schema.Boolean),
+    team: Schema.optional(NonBlank),
+    channel: Schema.optional(NonBlank),
+    denyPaths: Schema.optional(Schema.Array(NonBlank)),
+    maxChangedLines: Schema.optional(PositiveInt)
+  }))
 })
 export type ConfigFile = typeof ConfigFile.Type
 

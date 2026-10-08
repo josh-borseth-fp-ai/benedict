@@ -88,6 +88,19 @@ test("context resolves immutable commits and provides exact patches and policy",
   assert.deepEqual(result.files[0]?.skills, ["correctness", "security"])
 })
 
+test("review commands accept stamp configuration without weakening review policy", (t) => {
+  const { repo, context, check, run } = fixture(t)
+  write(repo, "review.yaml", 'skills: [security]\nstamp:\n  enabled: true\n  team: Engineering\n  channel: stamp\n  denyPaths: ["infra/**"]\n  maxChangedLines: 100\n')
+  assert.deepEqual(context().config.skills, ["security"])
+  assert.equal(check([]).summary.accepted, 0)
+  write(repo, "review.yaml", "stamp:\n  enabled: 'yes'\n")
+  assert.equal(run("context").status, 2)
+  write(repo, "review.yaml", "stamp:\n  maxChangedLines: 0\n")
+  assert.equal(run("context").status, 2)
+  write(repo, "review.yaml", "stamp:\n  unknownOption: true\n")
+  assert.equal(run("context").status, 2)
+})
+
 test("evidence is checked against the selected head rather than dirty files", (t) => {
   const { repo, check, head } = fixture(t)
   write(repo, "src.ts", "export const value = 9;\n")

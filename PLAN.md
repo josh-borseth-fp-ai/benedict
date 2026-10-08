@@ -40,3 +40,12 @@ The existing coding agent owns investigation and judgment. The CLI reads the rep
 ## Later
 
 Add targeted retrieval or additional conditional review lenses when real reviews demonstrate a need. Keep hosted services, provider orchestration, autonomous edits, and a vector database outside the project scope.
+
+## Stamp
+
+The stamp bot in Teams approves a PR when someone posts `stamp <url>` in its channel. The review agent can post that for a clean PR.
+
+- `scripts/stamp.ts` decides, not the model. It checks the PR is open and current, the review covered the whole PR, there are no findings, no protected path changed, and the PR is under the line limit. It reads those rules from the base branch.
+- Posting goes out as the developer. Teams uses [`@floriscornel/teams-mcp`](https://github.com/floriscornel/teams-mcp), which runs locally and signs in with the developer's Microsoft account. GitHub uses `gh`. There is no separate bot or service account.
+- The Teams message and a PR comment carry the 🤖 Review Agent attribution. A hidden marker in the comment stops a second stamp for the same head commit.
+- `yaml` reads `review.yaml`; `picomatch` uses the same deny-path glob semantics as the review CLI.
