@@ -1,0 +1,17 @@
+{
+  "name": "review-skill-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scripts the review skill runs, such as the stamp rules.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "stamp": "node scripts/stamp.ts",
+    "test": "node --test scripts/gate.test.ts"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
+}
