@@ -83,6 +83,11 @@ describe("parseNumstat", () => {
 })
 
 describe("matchGlob", () => {
+  test("deny paths honor brace patterns and hidden files like the review CLI", () => {
+    const config = { ...facts().config, denyPaths: ["**/*.{yml,yaml}", "**/.secret"] }
+    const files = [{ path: ".github/workflows/ci.yml", lines: 1 }, { path: "config/.secret", lines: 1 }]
+    assert.equal(evaluate(facts({ config, files })).length, 2)
+  })
   test("matches the documented examples", () => {
     assert.equal(matchGlob("api/**", "api/v1/user.ts"), true)
     assert.equal(matchGlob("api/**", "web/api/user.ts"), false)

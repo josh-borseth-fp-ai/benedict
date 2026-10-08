@@ -39,28 +39,36 @@ const fetchCommit = (remote: string, ref: string): string => {
 const main = (): number => {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { report: { type: "string" }, remote: { type: "string", default: "origin" } },
+    options: { report: { type: "string" }, remote: { type: "string" } },
   })
   const [command] = positionals
   if ((command !== "check" && command !== "comment") || values.report === undefined) {
-    process.stderr.write("Usage: stamp.ts <check|comment> --report <file> [--remote origin]\n")
+    process.stderr.write("Usage: stamp.ts <check|comment> --report <file> [--remote <upstream remote>]\n")
     return 2
   }
 
   const report = parseReport(readFileSync(values.report, "utf8"))
-  const view = JSON.parse(
+  const target = /^https:\/\/github\.com\/([a-zA-Z0-9-]+)\/([a-zA-Z0-9_.-]+)\/pull\/([1-9]\d*)\/?$/.exec(report.pr)
+  if (target === null || [".", ".."].includes(target[2]!)) throw new Error("Report pr must be a full GitHub PR URL.")
+  const remote = values.remote ?? `https://github.com/${target[1]}/${target[2]}.git`
+  const readPr = () => JSON.parse(
     run("gh", ["pr", "view", report.pr, "--json", "url,number,state,isDraft,headRefOid,baseRefName,comments"]),
   ) as PullRequest & { comments: { body: string }[] }
+  const initial = readPr()
 
-  const baseTip = fetchCommit(values.remote, `refs/heads/${view.baseRefName}`)
-  fetchCommit(values.remote, `refs/pull/${view.number}/head`)
+  const baseTip = fetchCommit(remote, `refs/heads/${initial.baseRefName}`)
+  const fetchedHead = fetchCommit(remote, `refs/pull/${initial.number}/head`)
+  const view = readPr()
+  if (view.baseRefName !== initial.baseRefName || view.headRefOid !== fetchedHead)
+    throw new Error("The PR changed while fetching. Review its current range before retrying.")
   const mergeBase = run("git", ["merge-base", baseTip, view.headRefOid]).trim()
 
   // Read the rules from the base branch, so the PR cannot loosen them.
-  const configText = CONFIG_FILES.map((name) => tryRun("git", ["show", `${baseTip}:${name}`])).find(
-    (text) => text !== undefined,
+  const configs = CONFIG_FILES.map((name) => tryRun("git", ["show", `${baseTip}:${name}`])).filter(
+    (text): text is string => text !== undefined,
   )
-  const config = parseStampConfig(configText)
+  if (configs.length > 1) throw new Error("Multiple review configs found on the base branch.")
+  const config = parseStampConfig(configs[0])
   const files = parseNumstat(run("git", ["diff", "--numstat", "-z", "--no-renames", mergeBase, view.headRefOid]))
 
   const reasons = evaluate({

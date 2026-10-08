@@ -3,3 +3,7 @@
 *.log
 .DS_Store
 node_modules/
+dist/
+*.tgz
+
+.agents/skills/review/node_modules/

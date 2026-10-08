@@ -1,4 +1,5 @@
 import { parse } from "yaml"
+import picomatch from "picomatch"
 
 export type Severity = "low" | "medium" | "high" | "critical"
 
@@ -127,24 +128,8 @@ export const parseNumstat = (text: string): ChangedFile[] =>
     })
 
 /** Full-match a repository path glob. `api/**` matches `api/v1/user.ts`; `*.ts` does not match `src/user.ts`. */
-export const matchGlob = (pattern: string, path: string): boolean => {
-  let source = "^"
-  for (let i = 0; i < pattern.length; i++) {
-    const char = pattern[i] as string
-    if (char === "*" && pattern[i + 1] === "*") {
-      if (pattern[i + 2] === "/") {
-        source += "(?:.*/)?"
-        i += 2
-      } else {
-        source += ".*"
-        i += 1
-      }
-    } else if (char === "*") source += "[^/]*"
-    else if (char === "?") source += "[^/]"
-    else source += "\\^$+.()|[]{}".includes(char) ? `\\${char}` : char
-  }
-  return new RegExp(`${source}$`).test(path)
-}
+export const matchGlob = (pattern: string, path: string): boolean =>
+  picomatch.isMatch(path, pattern, { dot: true, strictBrackets: true })
 
 export const marker = (head: string) => `<!-- review-agent-stamp:${head} -->`
 
