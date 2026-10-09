@@ -254,7 +254,8 @@ test("empty findings still publish a useful summary and optional context", (t) =
 
 test("publish uses repository policy and supports explicit reviewed commits and text preview", (t) => {
   const f = fixture(t)
-  writeFileSync(join(f.repo, "review.json"), JSON.stringify({ minimumConfidence: 0.95 }))
+  mkdirSync(join(f.repo, ".review"), { recursive: true })
+  writeFileSync(join(f.repo, ".review/config.json"), JSON.stringify({ minimumConfidence: 0.95 }))
   const result = f.success("--base", f.base, "--head", f.head)
   assert.deepEqual(result.summary, { accepted: 0, rejected: 1 })
   assert.ok(!result.body.includes(draft.title))

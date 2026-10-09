@@ -7,7 +7,7 @@ import { Git } from "./git.js"
 import { GitHub } from "./github.js"
 import { publishReview } from "./publish.js"
 import { resolvePullRequest } from "./pull-request.js"
-import { ReviewError } from "./model.js"
+import { ReviewError, configPath, lockPath } from "./model.js"
 import type { CheckReport, ReviewContext, ReviewOptions } from "./model.js"
 import { setup } from "./setup.js"
 import { stampReview } from "./stamp.js"
@@ -19,7 +19,7 @@ const rangeFlags = {
   base: Flag.String("base").pipe(Flag.optional, Flag.withDescription("Base commit; defaults to HEAD~1, or HEAD with --worktree")),
   head: Flag.String("head").pipe(Flag.optional, Flag.withDescription("Head commit; defaults to HEAD")),
   worktree: Flag.Boolean("worktree").pipe(Flag.withDefault(false), Flag.withDescription("Review staged, unstaged and untracked files against the base")),
-  config: Flag.String("config").pipe(Flag.optional, Flag.withDescription("Config path, relative to the repository root")),
+  config: Flag.String("config").pipe(Flag.optional, Flag.withDescription(`JSON config path, relative to the repository root; defaults to ${configPath}`)),
   format: Flag.Literals("format", ["json", "text"]).pipe(Flag.withDefault("json"), Flag.withDescription("Output format; defaults to JSON"))
 }
 
@@ -90,7 +90,7 @@ const syncCommand = Command.make("sync", {
   const root = yield* repositoryRoot(flags.repo)
   const result = yield* syncOrganization(root, Option.getOrUndefined(flags.config), flags.update)
   yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) :
-    `Organization: ${result.organization.source}\nRevision: ${result.organization.revision}\nKnowledge files: ${result.knowledgeFiles.length}\n${result.lockChanged ? "Updated .review/knowledge.lock.json; review and commit it." : "Cached locked revision; lock unchanged."}`)
+    `Organization: ${result.organization.source}\nRevision: ${result.organization.revision}\nKnowledge files: ${result.knowledgeFiles.length}\n${result.lockChanged ? `Updated ${lockPath}; review and commit it.` : "Cached locked revision; lock unchanged."}`)
 })).pipe(Command.withDescription("Cache the locked organization knowledge; --update explicitly advances its revision."))
 
 const setupCommand = Command.make("setup", {
@@ -110,7 +110,7 @@ const setupCommand = Command.make("setup", {
     organization: Option.getOrUndefined(flags.organization), ref: Option.getOrUndefined(flags.ref),
     project: flags.project, agents: flags.agent, yes: flags.yes, skipSkills: flags.skipSkills
   })
-  yield* Console.log(`${result.skillInstalled ? `Installed the review skill (${result.scope} scope).` : "Skill installation skipped."}\n${result.organization ? `Organization revision: ${result.organization.revision}\nReview and commit review.yaml and .review/knowledge.lock.json.` : "No organization configured; repository rules still apply."}\nAsk your coding agent to use the review skill to review your change.`)
+  yield* Console.log(`${result.skillInstalled ? `Installed the review skill (${result.scope} scope).` : "Skill installation skipped."}\n${result.organization ? `Organization revision: ${result.organization.revision}\nReview and commit ${configPath} and ${lockPath}.` : "No organization configured; repository rules still apply."}\nAsk your coding agent to use the review skill to review your change.`)
 })).pipe(Command.withDescription("Install the bundled skill and connect this repository to organization knowledge."))
 
 const publishCommand = Command.make("publish", {

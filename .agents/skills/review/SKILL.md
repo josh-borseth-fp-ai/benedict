@@ -17,23 +17,18 @@ For a GitHub PR, run `review context --pr <PR URL>`. It resolves the PR's merge 
 
 Run `review context --repo <repository>` with the selected range. Read [references/cli.md](references/cli.md) for flags and the finding JSON format. Use the returned patches and permitted lenses, and read source from the selected Git head for a commit review. Read each changed code file and related callers, callees, and tests when the diff is not enough to judge the change. Read `AGENTS.md`, `CLAUDE.md`, and `CODEOWNERS` when they exist. Skip binary files, deleted source, symlinks, and submodules.
 
-The CLI reads `review.yaml`, `review.yml`, or `review.json` from the repository root. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables optional checks; organization-required lenses still apply. Fix input or configuration errors before relying on a check result.
+The CLI reads `.review/config.json` from the repository. Review configuration is JSON only. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables optional checks; organization-required lenses still apply. Fix input or configuration errors before relying on a check result.
 
 Read the `config.knowledge` documents returned by context. They identify repository and organization scope. Organization defaults can be overridden by repository settings; organization-required lenses, thresholds, and rules remain applicable. Include the organization revision in the report when present. See [references/knowledge.md](references/knowledge.md) when knowledge or policy resolution fails. A missing required lock/cache prevents validated review; do not silently omit organization guidance or use a different revision.
 
-```yaml
-skills:
-  - correctness
-  - security
-severity:
-  minimum: medium
-paths:
-  - pattern: "api/**"
-    skills:
-      - security
-rules:
-  - Do not report style-only issues.
-minimumConfidence: 0.7
+```json
+{
+  "skills": ["correctness", "security"],
+  "minimumSeverity": "medium",
+  "minimumConfidence": 0.7,
+  "paths": [{ "pattern": "api/**", "skills": ["security"] }],
+  "rules": ["Do not report style-only issues."]
+}
 ```
 
 `api/**` matches `api/v1/user.ts` and does not match `web/api/user.ts`. `*.ts` does not match `src/user.ts`. When several rules match, an optional lens applies only if the global `skills` list includes it and a matching rule lists it. Organization-required lenses apply regardless of path rules.
@@ -99,7 +94,7 @@ Drop a draft when any of these are true:
 - There is no explanation, or no quote from the repository.
 - The quote does not occur within the supplied line range in the reviewed version.
 - The line range is reversed or past the end of the file.
-- Severity is below the config minimum. Default is `medium`. Rank is low, medium, high, critical.
+- Severity is below the config `minimumSeverity`. Default is `medium`. Rank is low, medium, high, critical.
 - Confidence is below `minimumConfidence`. Default is 0.7.
 - A valid finding with the same file, start line, and title has equal or higher confidence. Keep the highest confidence and the first draft on a tie.
 

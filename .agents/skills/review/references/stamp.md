@@ -2,14 +2,17 @@
 
 A stamp is a GitHub approval from the organization's Review Agent GitHub App, submitted by the shared approval service after your review. Each developer configures the trusted endpoint as `REVIEW_STAMP_URL` and the approval key as `REVIEW_STAMP_KEY`. Never put the key in review config, findings, review context or conversation output. The base branch's endpoint must match the trusted local URL before the key is sent.
 
-The base branch configures:
+The base branch's `.review/config.json` configures:
 
-```yaml
-stamp:
-  enabled: true
-  service: https://review.example.com/api/stamp
-  denyPaths: ["infra/**", ".github/workflows/**"]
-  maxChangedLines: 400
+```json
+{
+  "stamp": {
+    "enabled": true,
+    "service": "https://review.example.com/api/stamp",
+    "denyPaths": ["infra/**", ".github/workflows/**"],
+    "maxChangedLines": 400
+  }
+}
 ```
 
 A PR qualifies only when the review has zero accepted findings and an overall confidence of 4/5 or 5/5. Publish the review first. Its context must state the score once as `**Confidence: N/5**`. Then pass the original findings file, the same committed whole-PR range and config, and the same score:

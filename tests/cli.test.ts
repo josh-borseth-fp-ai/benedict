@@ -20,6 +20,8 @@ const write = (repo: string, path: string, source: string | Uint8Array) => {
   writeFileSync(join(repo, path), source)
 }
 
+const configure = (repo: string, config: Record<string, unknown>) => write(repo, ".review/config.json", JSON.stringify(config, null, 2))
+
 const fixture = (t: TestContext) => {
   const repo = mkdtempSync(join(tmpdir(), "review-cli-"))
   t.after(() => rmSync(repo, { recursive: true, force: true }))
@@ -90,17 +92,13 @@ test("context resolves immutable commits and provides exact patches and policy",
 
 test("review commands accept stamp configuration without weakening review policy", (t) => {
   const { repo, context, check, run } = fixture(t)
-  write(repo, "review.yaml", 'skills: [security]\nstamp:\n  enabled: true\n  service: https://stamp.example.invalid/api/stamp\n  denyPaths: ["infra/**"]\n  maxChangedLines: 100\n')
+  configure(repo, { skills: ["security"], stamp: { enabled: true, service: "https://stamp.example.invalid/api/stamp", denyPaths: ["infra/**"], maxChangedLines: 100 } })
   assert.deepEqual(context().config.skills, ["security"])
   assert.equal(check([]).summary.accepted, 0)
-  write(repo, "review.yaml", "stamp:\n  enabled: 'yes'\n")
-  assert.equal(run("context").status, 2)
-  write(repo, "review.yaml", "stamp:\n  maxChangedLines: 0\n")
-  assert.equal(run("context").status, 2)
-  write(repo, "review.yaml", "stamp:\n  team: Engineering\n")
-  assert.equal(run("context").status, 2)
-  write(repo, "review.yaml", "stamp:\n  unknownOption: true\n")
-  assert.equal(run("context").status, 2)
+  for (const stamp of [{ enabled: "yes" }, { maxChangedLines: 0 }, { unknownOption: true }, { team: "Engineering" }]) {
+    configure(repo, { stamp })
+    assert.equal(run("context").status, 2)
+  }
 })
 
 test("evidence is checked against the selected head rather than dirty files", (t) => {
@@ -152,7 +150,17 @@ test("thresholds and duplicate selection keep the highest valid confidence", (t)
 
 test("repository policy uses anchored globs, global lens permissions and matching-rule unions", (t) => {
   const { repo, context, check } = fixture(t)
-  write(repo, "review.yaml", 'skills: [security]\nseverity:\n  minimum: high\nminimumConfidence: 0.85\npaths:\n  - pattern: "api/**"\n    skills: [correctness]\n  - pattern: "api/**"\n    skills: [security]\n  - pattern: "*.ts"\n    skills: []\nrules: ["Only report exploitable issues."]\n')
+  configure(repo, {
+    skills: ["security"],
+    minimumSeverity: "high",
+    minimumConfidence: 0.85,
+    paths: [
+      { pattern: "api/**", skills: ["correctness"] },
+      { pattern: "api/**", skills: ["security"] },
+      { pattern: "*.ts", skills: [] }
+    ],
+    rules: ["Only report exploitable issues."]
+  })
   for (const file of ["api/auth.ts", "web/api/client.ts"]) write(repo, file, "unsafe();\n")
   git(repo, "add", "api", "web")
   git(repo, "commit", "--quiet", "-m", "api files")
@@ -256,22 +264,22 @@ test("worktree skips link targets outside the repository", (t) => {
 
 test("config errors fail closed, and --config resolves relative to the repository", (t) => {
   const { repo, run, context } = fixture(t)
-  write(repo, "review.yaml", "minimumConfidnce: 0.1\n")
-  let result = run("context")
+  configure(repo, { minimumConfidnce: 0.1 })
+  const result = run("context")
   assert.equal(result.status, 2)
   assert.equal(result.stdout, "")
   assert.equal(JSON.parse(result.stderr).error.code, "config_error")
-  write(repo, "review.yaml", "skills: [security]\n")
-  write(repo, "review.json", JSON.stringify({ skills: ["correctness"] }))
-  result = run("context")
-  assert.equal(result.status, 2)
-  assert.match(JSON.parse(result.stderr).error.message, /Multiple review configs/)
-  assert.deepEqual(context("--config", "review.json").files[0]?.skills, ["correctness"])
+  for (const config of ["skills: [security]\n", '{"skills": ["security"],}', '{"severity": {"minimum": "high"}}', '{"skills": null}']) {
+    write(repo, ".review/config.json", config)
+    assert.equal(run("context").status, 2)
+  }
+  configure(repo, { skills: ["security"] })
+  assert.deepEqual(context().files[0]?.skills, ["security"])
+  write(repo, "alternate.json", JSON.stringify({ skills: ["correctness"] }))
+  assert.deepEqual(context("--config", "alternate.json").files[0]?.skills, ["correctness"])
   assert.equal(run("context", "--config", "absent.json").status, 2)
-  write(repo, "bad.yaml", "skills: [security]\nskills: [correctness]\n")
-  assert.equal(run("context", "--config", "bad.yaml").status, 2)
-  write(repo, "bad.yaml", 'paths: [{pattern: "api/[", skills: [security]}]\n')
-  assert.equal(run("context", "--config", "bad.yaml").status, 2)
+  write(repo, "bad.json", JSON.stringify({ paths: [{ pattern: "api/[", skills: ["security"] }] }))
+  assert.equal(run("context", "--config", "bad.json").status, 2)
 })
 
 test("invalid revisions and conflicting range flags produce actionable errors", (t) => {

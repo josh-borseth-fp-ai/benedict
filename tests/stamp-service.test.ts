@@ -25,7 +25,7 @@ const fixture = () => {
     installed: true,
     pr: { state: "open", draft: false, head: { sha: head }, base: { sha: base }, user: { id: 1, login: "author" }, changed_files: 1 },
     mergeBase: base,
-    config: `stamp:\n  enabled: true\n  service: ${service}\n`,
+    config: JSON.stringify({ stamp: { enabled: true, service } }),
     files: [{ filename: "safe.ts", additions: 1, deletions: 1, patch: "@@ ..." }] as Array<{ filename: string; additions: number; deletions: number; patch?: string; previous_filename?: string }>,
     comment: { body: reviewBody(), issue_url: "https://api.github.com/repos/acme/project/issues/7" } as { body: string; issue_url: string } | undefined,
     reviews: [] as ReviewRecord[],
@@ -47,7 +47,7 @@ const fixture = () => {
         return state.unknownWrite ? Effect.fail(stampError("write_uncertain", "Lost response.", 502)) : Effect.succeed(review)
       }
       if (endpoint.includes("/compare/")) return Effect.succeed({ merge_base_commit: { sha: state.mergeBase } })
-      if (endpoint.includes("/contents/")) return endpoint.includes("review.yaml") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(stampError("github_not_found", "Not found.", 404))
+      if (endpoint.includes("/contents/")) return endpoint.includes("/contents/.review/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(stampError("github_not_found", "Not found.", 404))
       if (endpoint.includes("/files?")) return Effect.succeed(state.files)
       if (endpoint.includes("/issues/comments/55")) return state.comment ? Effect.succeed(state.comment) : Effect.fail(stampError("github_not_found", "Not found.", 404))
       if (endpoint.includes("/reviews?")) { if (state.mutateAfterReviews) state.pr.head.sha = "c".repeat(40); return Effect.succeed(state.reviews) }
@@ -116,9 +116,11 @@ test("the service rechecks findings, confidence, installation, whole-PR range, p
     ["stale_review", f => { f.state.pr.head.sha = "c".repeat(40) }],
     ["partial_review", f => { f.state.mergeBase = "c".repeat(40) }],
     ["stamp_refused", f => { f.state.pr.draft = true }],
-    ["stamp_refused", f => { f.state.config = "stamp:\n  enabled: false\n" }],
-    ["stamp_refused", f => { f.state.config = "stamp:\n  enabled: true\n  service: https://other.example.invalid/api/stamp\n" }],
+    ["stamp_refused", f => { f.state.config = JSON.stringify({ stamp: { enabled: false, service } }) }],
+    ["stamp_refused", f => { f.state.config = JSON.stringify({ stamp: { enabled: true, service: "https://other.example.invalid/api/stamp" } }) }],
+    ["config_error", f => { f.state.config = `stamp:\n  enabled: true\n  service: ${service}\n` }],
     ["protected_path", f => { f.state.files[0]!.previous_filename = ".agents/skills/review/SKILL.md" }],
+    ["protected_path", f => { f.state.files[0]!.filename = ".review/knowledge.lock.json" }],
     ["size_limit", f => { f.state.files[0]!.additions = 401 }],
     ["coverage", f => { delete f.state.files[0]!.patch }],
     ["review_missing", f => { f.state.comment = undefined }],

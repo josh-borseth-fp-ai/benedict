@@ -44,14 +44,17 @@ export REVIEW_STAMP_URL=https://review.example.com/api/stamp
 # Configure REVIEW_STAMP_KEY through your normal secret configuration.
 ```
 
-Each repository authorizes the same endpoint on its base branch:
+Each repository authorizes the same endpoint in `.review/config.json` on its base branch:
 
-```yaml
-stamp:
-  enabled: true
-  service: https://review.example.com/api/stamp
-  denyPaths: ["infra/**", ".github/workflows/**"]
-  maxChangedLines: 400
+```json
+{
+  "stamp": {
+    "enabled": true,
+    "service": "https://review.example.com/api/stamp",
+    "denyPaths": ["infra/**", ".github/workflows/**"],
+    "maxChangedLines": 400
+  }
+}
 ```
 
 Any key holder can request a stamp, including for their own PR. Rotate `STAMP_KEY` when someone leaves.

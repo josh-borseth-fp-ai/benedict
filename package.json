@@ -10,6 +10,7 @@
   "files": [
     "dist",
     ".agents/skills/review",
+    "schemas",
     "stamp-service",
     "README.md"
   ],
@@ -18,6 +19,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --import tsx --test tests/*.test.ts",
     "review": "tsx src/main.ts",
+    "schemas": "tsx scripts/write-schemas.ts",
     "prepack": "npm run build"
   },
   "engines": {
@@ -27,8 +29,7 @@
     "@effect/platform-node": "4.0.2",
     "effect": "4.0.2",
     "picomatch": "4.0.7",
-    "skills": "1.7.1",
-    "yaml": "2.9.1"
+    "skills": "1.7.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

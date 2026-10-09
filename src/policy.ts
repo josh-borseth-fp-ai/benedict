@@ -1,6 +1,5 @@
 import { Effect } from "effect"
 import picomatch from "picomatch"
-import { parseDocument } from "yaml"
 import { ReviewError } from "./model.js"
 import type { ConfigFile, OrganizationBundle, ReviewConfig, Severity, Skill } from "./model.js"
 
@@ -11,14 +10,9 @@ const defaultRules = [
 ]
 const ranks: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 
-export const parseConfig = (text: string, filename: string) => Effect.try({
-  try: () => {
-    if (filename.endsWith(".json")) return JSON.parse(text) as unknown
-    const document = parseDocument(text, { uniqueKeys: true })
-    if (document.errors.length > 0) throw new Error(document.errors.map((e) => e.message).join("; "))
-    return document.toJS({ maxAliasCount: 50 }) as unknown
-  },
-  catch: (error) => new ReviewError({ code: "config_error", message: `Invalid config ${filename}: ${String(error)}` })
+export const parseJson = (text: string, filename: string) => Effect.try({
+  try: () => JSON.parse(text) as unknown,
+  catch: (error) => new ReviewError({ code: "config_error", message: `Invalid JSON in ${filename}: ${String(error)}` })
 })
 
 export const relativeDocumentPath = (file: string): string => {
@@ -37,13 +31,13 @@ export const resolvePolicy = (local: ConfigFile, source: string | null, org: Org
   if (local.skills !== undefined && requiredSkills.some((skill) => !local.skills!.includes(skill))) {
     fail(`Repository skills cannot exclude organization-required lenses: ${requiredSkills.join(", ")}.`)
   }
-  if (local.severity && required.minimumSeverity && ranks[local.severity.minimum] < ranks[required.minimumSeverity]) {
+  if (local.minimumSeverity && required.minimumSeverity && ranks[local.minimumSeverity] < ranks[required.minimumSeverity]) {
     fail(`Repository minimum severity cannot be below organization requirement ${required.minimumSeverity}.`)
   }
   if (local.minimumConfidence !== undefined && required.minimumConfidence !== undefined && local.minimumConfidence < required.minimumConfidence) {
     fail(`Repository minimum confidence cannot be below organization requirement ${required.minimumConfidence}.`)
   }
-  let minimumSeverity = local.severity?.minimum ?? defaults?.severity?.minimum ?? "medium"
+  let minimumSeverity = local.minimumSeverity ?? defaults?.minimumSeverity ?? "medium"
   if (required.minimumSeverity && ranks[minimumSeverity] < ranks[required.minimumSeverity]) minimumSeverity = required.minimumSeverity
   const paths = local.paths ?? defaults?.paths ?? []
   for (const { pattern } of paths) {

@@ -1,10 +1,10 @@
 import { Effect, Schema } from "effect"
 import picomatch from "picomatch"
-import { ConfigFile } from "./model.js"
-import { parseConfig } from "./policy.js"
+import { ConfigFile, configPath } from "./model.js"
+import { parseJson } from "./policy.js"
 import { parsePullRequest } from "./publish.js"
 import { StampGitHub } from "./stamp-github.js"
-import { minimumConfidence, publishedConfidence, Sha, StampReport, stampError } from "./stamp-protocol.js"
+import { minimumConfidence, protectedPaths, publishedConfidence, Sha, StampReport, stampError } from "./stamp-protocol.js"
 import type { StampResult } from "./stamp-protocol.js"
 
 const Identity = Schema.Struct({ id: Schema.Int, login: Schema.String })
@@ -13,8 +13,6 @@ type Pr = typeof Pr.Type
 const File = Schema.Struct({ filename: Schema.String, previous_filename: Schema.optional(Schema.String), additions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), deletions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), patch: Schema.optional(Schema.String) })
 const Review = Schema.Struct({ state: Schema.String, commit_id: Schema.NullOr(Sha), html_url: Schema.String, user: Schema.NullOr(Identity) })
 const Comment = Schema.Struct({ body: Schema.NullOr(Schema.String), issue_url: Schema.String })
-const CONFIGS = ["review.yaml", "review.yml", "review.json"]
-const PROTECTED = [...CONFIGS, ".agents/skills/review/**", "stamp-service/**", "src/stamp*.ts"]
 
 const decode = <S extends Schema.Top>(schema: S, value: unknown) => Schema.decodeUnknownEffect(schema)(value).pipe(
   Effect.mapError(() => stampError("invalid_response", "The stamp service received an invalid response.", 502))
@@ -38,19 +36,12 @@ const checkPolicy = Effect.fn("Stamp.checkPolicy")(function*(token: string, repo
   const gh = yield* StampGitHub
   const comparison = yield* decode(Schema.Struct({ merge_base_commit: Schema.Struct({ sha: Sha }) }), yield* gh.request(token, "GET", `repos/${repository}/compare/${pr.base.sha}...${report.head}`))
   if (comparison.merge_base_commit.sha !== report.base) return yield* stampError("partial_review", "The review did not cover the whole PR.")
-  const configs: Array<{ name: string; content: string }> = []
-  for (const name of CONFIGS) {
-    const value = yield* gh.request(token, "GET", `repos/${repository}/contents/${name}?ref=${pr.base.sha}`).pipe(Effect.result)
-    if (value._tag === "Failure") {
-      if (value.failure.code === "github_not_found") continue
-      return yield* value.failure
-    }
-    const content = yield* decode(Schema.Struct({ type: Schema.Literal("file"), encoding: Schema.Literal("base64"), content: Schema.String, size: Schema.Int }), value.success)
-    if (content.size > 100_000) return yield* stampError("config_error", "The base config is too large.")
-    configs.push({ name, content: Buffer.from(content.content, "base64").toString("utf8") })
-  }
-  if (configs.length !== 1) return yield* stampError("config_error", "The base branch must have exactly one review config.")
-  const parsed = yield* parseConfig(configs[0]!.content, configs[0]!.name).pipe(Effect.mapError(() => stampError("config_error", "The base review config is invalid.")))
+  const value = yield* gh.request(token, "GET", `repos/${repository}/contents/${configPath}?ref=${pr.base.sha}`).pipe(
+    Effect.mapError((error) => error.code === "github_not_found" ? stampError("config_error", `The base branch must have ${configPath}.`) : error)
+  )
+  const content = yield* decode(Schema.Struct({ type: Schema.Literal("file"), encoding: Schema.Literal("base64"), content: Schema.String, size: Schema.Int }), value)
+  if (content.size > 100_000) return yield* stampError("config_error", "The base config is too large.")
+  const parsed = yield* parseJson(Buffer.from(content.content, "base64").toString("utf8"), configPath).pipe(Effect.mapError(() => stampError("config_error", "The base review config is invalid.")))
   const config = yield* Schema.decodeUnknownEffect(ConfigFile, { onExcessProperty: "error" })(parsed).pipe(
     Effect.mapError(() => stampError("config_error", "The base review config is invalid."))
   )
@@ -63,7 +54,7 @@ const checkPolicy = Effect.fn("Stamp.checkPolicy")(function*(token: string, repo
   for (const file of files) {
     if (file.patch === undefined) return yield* stampError("coverage", "A changed file has no text patch; manual review is required.")
     for (const name of [file.filename, file.previous_filename].filter((name): name is string => name !== undefined)) {
-      const protectedPath = [...PROTECTED, ...(stamp.denyPaths ?? [])].some(pattern => picomatch.isMatch(name, pattern, { dot: true, strictBrackets: true }))
+      const protectedPath = [...protectedPaths, ...(stamp.denyPaths ?? [])].some(pattern => picomatch.isMatch(name, pattern, { dot: true, strictBrackets: true }))
       if (protectedPath) return yield* stampError("protected_path", `A protected path changed: ${name}.`)
     }
     lines += file.additions + file.deletions

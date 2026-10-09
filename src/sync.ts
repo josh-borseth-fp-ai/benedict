@@ -3,7 +3,7 @@ import { Effect, FileSystem, Path } from "effect"
 import { readRepositoryConfig } from "./config.js"
 import { Git } from "./git.js"
 import { cacheDirectory, readLock, readOrganizationBundle, readRepositoryKnowledge, resolveOrganization, writeLock } from "./knowledge.js"
-import { ReviewError } from "./model.js"
+import { ReviewError, configPath } from "./model.js"
 import type { ConfigFile } from "./model.js"
 import { resolvePolicy } from "./policy.js"
 
@@ -16,7 +16,7 @@ export const repositoryRoot = Effect.fn("Review.repositoryRoot")(function*(direc
 /** Fetching is explicit. This prepares a validated bundle without changing repo files. */
 export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root: string, decoded: ConfigFile, update: boolean) {
   if (!decoded.organization) {
-    return yield* new ReviewError({ code: "knowledge_error", message: "No organization configured. Add organization.source to review.yaml or run review setup --organization <Git URL> inside the repository." })
+    return yield* new ReviewError({ code: "knowledge_error", message: `No organization configured. Add organization.source to ${configPath} or run review setup --organization <Git URL> inside the repository.` })
   }
   const git = yield* Git
   const fs = yield* FileSystem.FileSystem
