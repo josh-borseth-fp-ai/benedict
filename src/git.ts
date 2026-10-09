@@ -1,16 +1,16 @@
-import { Context, Effect, Layer, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ReviewError } from "./model.js"
 
 export class Git extends Context.Service<Git, {
-  readonly run: (cwd: string, args: ReadonlyArray<string>) => Effect.Effect<string, ReviewError>
+  readonly run: (cwd: string, args: ReadonlyArray<string>, options?: { readonly timeout?: Duration.Input }) => Effect.Effect<string, ReviewError>
 }>()("review/Git") {
   static readonly layer = Layer.effect(Git, Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const run = Effect.fn("Git.run")(function*(cwd: string, args: ReadonlyArray<string>) {
+    const run = Effect.fn("Git.run")(function*(cwd: string, args: ReadonlyArray<string>, options?: { readonly timeout?: Duration.Input }) {
       const command = ChildProcess.make("git", ["--no-pager", "--literal-pathspecs", ...args], {
         cwd,
-        env: { GIT_OPTIONAL_LOCKS: "0" },
+        env: { GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
         extendEnv: true
       })
       const result = yield* Effect.scoped(Effect.gen(function*() {
@@ -22,7 +22,7 @@ export class Git extends Context.Service<Git, {
         ], { concurrency: 3 })
         return { stdout, stderr, exitCode: Number(exitCode) }
       })).pipe(
-        Effect.timeout("30 seconds"),
+        Effect.timeout(options?.timeout ?? "30 seconds"),
         Effect.mapError((error) => new ReviewError({
           code: "git_error",
           message: `Cannot run git ${args[0]}: ${String(error)}`

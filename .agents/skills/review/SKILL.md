@@ -11,7 +11,7 @@ You are the reviewer. This session is already the agent, so do not launch anothe
 
 Default base is `HEAD~1` and head is `HEAD`. Use the range the user names. For a worktree review, use `--worktree` with base `HEAD` unless the user names another base; this includes staged, unstaged, and untracked files.
 
-For a GitHub PR, obtain its current base and head commit hashes with `gh`, and review their merge base through the PR head unless the user selects a narrower range. Read the PR workflow in [references/cli.md](references/cli.md). Keep the resolved hashes for checking and publishing.
+For a GitHub PR, run `review context --pr <PR URL>`. It resolves the PR's merge base and current head with `gh`, fetches missing commits, and reviews that whole range unless the user selects a narrower `--base`. Read the PR workflow in [references/cli.md](references/cli.md). Keep the returned `range.base` and `range.head` hashes for checking, publishing and stamping.
 
 ## Gather
 

@@ -98,13 +98,19 @@ The result contains `accepted`, `rejected` with original draft indices and rejec
 
 Exit codes: **0** means all drafts passed, including an empty list; **1** means at least one draft was rejected; **2** means an input, configuration, or command error prevented validation. Operational errors go to stderr. Finding acceptance establishes evidence and policy compliance; the coding agent still determines whether the behavior is a real defect.
 
-`context` and `check` read the reviewed repository without modifying it or fetching remote knowledge. They exclude source findings on deleted files, binaries, symlinks, and submodules, and disable external Git diff and text conversion drivers. `setup` and `sync` explicitly manage installation, configuration, and knowledge locks.
+`context` and `check` read the reviewed repository without modifying it or fetching remote knowledge. `context --pr` may fetch missing PR commits from the matching GitHub remote; it adds objects only and does not move branches or change files. They exclude source findings on deleted files, binaries, symlinks, and submodules, and disable external Git diff and text conversion drivers. `setup` and `sync` explicitly manage installation, configuration, and knowledge locks.
 
 ## GitHub publishing
 
 Install [GitHub CLI](https://cli.github.com/) and sign in with `gh auth login`. The review CLI uses `gh api` for GitHub access; authentication stays with `gh`.
 
-Review the PR's merge base through its head commit, using the [PR workflow](.agents/skills/review/references/cli.md#github-pr-workflow) to obtain those hashes. Publish the same resolved range:
+Review the PR's merge base through its head commit. `review context --pr` resolves that range with `gh`, fetches the commits if they are missing locally, and reads the diff from Git:
+
+```sh
+review context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/NUMBER
+```
+
+See the [PR workflow](.agents/skills/review/references/cli.md#github-pr-workflow) for details. Publish the same resolved range:
 
 ```sh
 # Preview the exact comment. This reads PR metadata and makes no GitHub writes.
