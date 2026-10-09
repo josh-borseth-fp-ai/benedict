@@ -57,13 +57,13 @@ Use the same policy and Git range as `context`. Commit hashes prevent branch mov
 
 Report the resolved base and head, accepted findings, and rejected count. Keep the coding agent's judgment separate from mechanical validation: exact evidence and sufficient confidence do not by themselves prove a bug.
 
-The skill also requires an overall **Confidence: N/5** with a rationale. This is confidence that the reviewed change is safe to merge, and follows the rubric in [SKILL.md](../SKILL.md#overall-confidence). Keep it in the Markdown report; the JSON finding field `confidence` remains a number from 0 to 1.
+The skill also requires an overall **Confidence: N/5** with a rationale. This is confidence that the reviewed change is safe to merge, and follows the rubric in [SKILL.md](../SKILL.md#overall-confidence). Keep it in the Markdown report, and pass it to `publish` as `--confidence`; the JSON finding field `confidence` remains a number from 0 to 1.
 
 When organization knowledge is configured, include the source and organization revision from the check report. Read [knowledge.md](knowledge.md) for inheritance and cache failures. Setup and sync are onboarding/update operations, separate from the read-only review workflow.
 
 ## GitHub PR workflow
 
-Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with access to the destination PR. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL:
+Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with read access to the destination PR. Publishing also requires `BENEDICT_SERVICE_URL` and `BENEDICT_SERVICE_KEY`, and the Benedict GitHub App installed on the repository. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL:
 
 ```sh
 benedict context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/NUMBER
@@ -77,25 +77,27 @@ Investigate that resolved range, then pass the returned `range.base` and `range.
 benedict publish /tmp/findings.json --repo /path/to/project \
   --pr https://github.com/OWNER/REPO/pull/NUMBER \
   --base <reviewed-base-hash> --head <reviewed-head-hash> \
-  --context-file /tmp/review-context.md --dry-run --format text
+  --context-file /tmp/review-context.md --confidence 4 --dry-run --format text
 
-# Omit --dry-run to write the review to GitHub.
+# Omit --dry-run to post the review as the Benedict GitHub App.
 benedict publish /tmp/findings.json --repo /path/to/project \
   --pr https://github.com/OWNER/REPO/pull/NUMBER \
   --base <reviewed-base-hash> --head <reviewed-head-hash> \
-  --context-file /tmp/review-context.md
+  --context-file /tmp/review-context.md --confidence 4
 ```
 
-`publish` takes the original draft findings format, revalidates it, and posts only accepted findings plus the rejected count. The CLI accepts `--context-file` as optional, but the skill requires it for PR publication. Write the overall **Confidence: N/5**, a brief rationale and verification gaps, and a fenced `mermaid` architecture diagram of the reviewed PR into that file, even when the findings array is empty. Follow the [diagram guidance](../SKILL.md#pr-architecture-diagram); derive the diagram from this PR's code and changes. Markdown and Mermaid fences are preserved in the PR comment. The CLI validates findings; the agent owns the score, diagram accuracy, and Mermaid syntax.
+`publish` takes the original draft findings format, revalidates it, and posts only accepted findings plus the rejected count. `--confidence` is the required overall 1–5 score; the comment states it as **Overall confidence: N/5**. The CLI accepts `--context-file` as optional, but the skill requires it for PR publication. Write the score's rationale and verification gaps, and a fenced `mermaid` architecture diagram of the reviewed PR into that file, even when the findings array is empty. Follow the [diagram guidance](../SKILL.md#pr-architecture-diagram); derive the diagram from this PR's code and changes. Markdown and Mermaid fences are preserved in the PR comment. The CLI validates findings; the agent owns the score, diagram accuracy, and Mermaid syntax.
 
 Files resolve from the shell's current directory. Config uses the same `--config` flag and repository-relative resolution as `check`. With no explicit range, the base is the PR merge base and the head is local `HEAD`. Publication rejects a head that differs from the current PR, and does not accept `--worktree`.
 
 For meaningful UI changes, follow [UI evidence guidance](ui-evidence.md): check existing screenshots and focused video, request missing evidence from the implementation agent, and include the uploaded media URLs or evidence-comment link, demonstrated scenario, captured head, and any gaps in the context file. `publish` preserves Markdown links; it does not capture or upload media, and a local filesystem path will not become a GitHub attachment. Local-only reviews do not upload or publish evidence.
 
-Every comment starts with **AI-generated review** and identifies **Benedict**, the automated review skill and CLI. GitHub still displays the signed-in account as the uploader. The comment includes resolved commits, accepted findings, severity, lens, confidence, source links, evidence, suggested fixes when present, and optional context. Rejected draft contents and local repository paths stay out of the comment.
+After local validation, the CLI sends the validated review to the Benedict service at `BENEDICT_SERVICE_URL` with the key in a header. The service renders the same comment and posts it as the Benedict GitHub App, so GitHub shows `benedict[bot]` as the author. It does not run a model. Every comment starts with **AI-generated review** and identifies **Benedict**. The comment includes resolved commits, accepted findings, severity, lens, confidence, source links, evidence, suggested fixes when present, the overall confidence and optional context. Rejected draft contents and local repository paths stay out of the comment.
 
-One PR conversation comment is maintained per signed-in account. The CLI paginates comments and updates only a comment by that account starting with its automation marker. Unchanged content makes no write; multiple matching comments cause an error. PR metadata is rechecked before writing. Concurrent publishers can still race; run publishing sequentially for an account and PR. GitHub does not make the final metadata check and comment write atomic, so the comment always identifies the reviewed commit.
+The app maintains one PR conversation comment, whichever developer publishes. The service checks that the PR is open, that the reviewed head is the current PR head and that the reviewed base lies inside the PR. It then updates the app's marked comment or creates one. Unchanged content makes no write. PR metadata is rechecked before writing. The latest publication replaces the comment.
 
-JSON output contains `action` (`dry-run`, `created`, `updated`, or `unchanged`), `pr`, `commentUrl`, `range`, `summary`, and the exact `body`. Text output shows the action, destination, and body. Exit 0 means preview or publication succeeded, including when some drafts were dropped. Exit 2 means publication failed; GitHub writes are never automatically retried. A lost response may hide a successful write: inspect the PR before retrying. An ordinary repeat run discovers the existing marked comment. Comments above 60,000 bytes fail so the agent can shorten the content.
+Add `--stamp` to also request the app's approval; see [stamp.md](stamp.md).
 
-`--dry-run` reads PR metadata and validates locally, without writing to GitHub. It still requires `gh` authentication. If `gh` is unavailable or publication fails, report the local findings and publication failure without claiming that a comment was posted.
+JSON output contains `action` (`dry-run`, `created`, `updated`, or `unchanged`), `pr`, `commentUrl`, `postedBy`, `stamp`, `range`, `summary`, `confidence`, and the exact `body`. Text output shows the action, destination, any stamp outcome, and body. Exit 0 means preview or publication succeeded, including when some drafts were dropped. Exit 1 means the review was published but a requested stamp was refused. Exit 2 means publication failed; the CLI never automatically retries. After an uncertain `service_error`, rerunning the same command is safe. Comments above 60,000 bytes fail so the agent can shorten the content.
+
+`--dry-run` reads PR metadata and validates locally without contacting the service, so it needs `gh` but not the service settings. If publication fails, report the local findings and publication failure without claiming that a comment was posted.

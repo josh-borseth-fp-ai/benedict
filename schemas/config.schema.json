@@ -90,9 +90,6 @@
         "enabled": {
           "type": "boolean"
         },
-        "service": {
-          "type": "string"
-        },
         "denyPaths": {
           "type": "array",
           "items": {

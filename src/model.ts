@@ -56,7 +56,6 @@ export const ConfigFile = Schema.Struct({
   organization: Schema.optionalKey(OrganizationReference),
   stamp: Schema.optionalKey(Schema.Struct({
     enabled: Schema.optionalKey(Schema.Boolean),
-    service: Schema.optionalKey(NonBlank),
     denyPaths: Schema.optionalKey(Schema.Array(NonBlank)),
     maxChangedLines: Schema.optionalKey(PositiveInt)
   }))

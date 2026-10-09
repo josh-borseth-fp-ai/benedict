@@ -14,7 +14,7 @@ The skill guides investigation: read the change, trace related code, apply corre
 
 Repository policy (`.benedict/config.json`) and Markdown knowledge live alongside the code. Organization defaults, required constraints, and shared documents live in an organization-owned Git repository's `.benedict/organization.json`, using the same policy field names. `.benedict/knowledge.lock.json` records the selected source and commit. Review commands use that exact cache offline and include its revision in their output.
 
-`benedict publish` reuses that validator, renders a fixed AI attribution, verifies the PR range, and creates or updates an owned automation comment through GitHub CLI. The skill selects useful findings and context; deterministic code owns formatting, destination checks, and API operations.
+`benedict publish` reuses that validator, verifies the PR range, and sends the validated review to the Benedict service, which renders a fixed AI attribution and creates or updates the Benedict GitHub App's comment. The skill selects useful findings and context; deterministic code owns formatting, destination checks, and API operations.
 
 ## Pipeline
 
@@ -31,7 +31,7 @@ Coding agent loads the skill
 
 ## Boundaries
 
-The existing coding agent owns investigation and judgment. Review commands read the repository, run Git, and check mechanical constraints. Setup and sync explicitly write installation/configuration/lock state; they never change application source or execute organization code. PR publishing uses GitHub CLI, which owns its authentication. The CLI does not launch another agent or handle provider credentials. Passing validation does not prove that a finding describes a real bug.
+The existing coding agent owns investigation and judgment. Review commands read the repository, run Git, and check mechanical constraints. Setup and sync explicitly write installation/configuration/lock state; they never change application source or execute organization code. GitHub reads use GitHub CLI, which owns its authentication; every GitHub write goes through the Benedict service as the GitHub App. All AI inference runs locally in the developer's coding agent; the service never runs a model. The CLI does not launch another agent or handle provider credentials. Passing validation does not prove that a finding describes a real bug.
 
 ## First slice
 
@@ -48,26 +48,34 @@ The existing coding agent owns investigation and judgment. Review commands read 
 
 Add targeted retrieval or additional conditional review lenses when real reviews demonstrate a need. Keep provider orchestration, autonomous edits, and a vector database outside the project scope. The stamp service below is the shared approval component.
 
-## Stamp
+## Benedict service and stamp
 
-The developer's local coding agent reviews every PR, and a small approval service submits the approval as a single GitHub App. The opted-in reviewer pool, round-robin selection, user tokens and Azure Table storage are removed.
+The developer's local coding agent reviews every PR. A small stateless service posts the review and, when requested, the approval as a single GitHub App. Nothing posts from a developer's GitHub account, and no AI inference runs in the cloud.
 
 ### Flow
 
 ```
 Local agent follows the repository's AGENTS.md
-  → benedict context, investigate, benedict check, benedict publish (unchanged)
-  → benedict stamp approve --confidence N
-      local gates: zero accepted findings, confidence ≥ 4, whole current PR,
-      base-branch stamp config, protected paths, size limit
-  → POST BENEDICT_STAMP_URL with x-benedict-key
-  → approval service
+  → benedict context, investigate, benedict check
+  → benedict publish --confidence N [--stamp]
+      local: revalidate findings, verify the range against the PR via gh (read-only)
+  → POST BENEDICT_SERVICE_URL/api/reviews with x-benedict-key
+  → Benedict service
       authenticates the key, mints an installation token for the one repository,
-      repeats the gates against GitHub, checks for an existing bot approval
-  → POST /pulls/N/reviews as benedict[bot]: APPROVE at the reviewed head
+      checks the PR is open, the head is current and the base is inside the PR,
+      renders the comment, creates or updates benedict[bot]'s marked comment
+  → with --stamp: checks the stamp gates, checks for an existing bot approval,
+      POST /pulls/N/reviews as benedict[bot]: APPROVE at the reviewed head
 ```
 
 The service trusts the caller's review. It does not run a model; the local agent owns investigation and judgment. An approval means a key holder's agent reviewed the whole current PR and reported no blocking defects, under rules fixed by the base branch.
+
+### Why the app posts the review
+
+- **Attribution.** The comment and approval both come from `benedict[bot]`, so a clean review on your own PR does not look like self-review.
+- **One record.** The approval links the comment the service itself just wrote, rather than a comment the developer's account could edit.
+- **One comment per PR.** Every developer's publication updates the app's single comment.
+- **Simpler flow.** One command publishes and stamps; the CLI no longer searches for the developer's comment.
 
 ### Approval criteria
 
@@ -76,51 +84,44 @@ Both are required:
 - **Zero accepted findings.** `benedict check` removes drafts outside the diff, without matching evidence, below `severity.minimum` (default medium), below `minimumConfidence` (default 0.7), in a lens not permitted for the path, or duplicated. Anything left is a substantiated defect and blocks approval. Rejected drafts do not block.
 - **Overall confidence of 4/5 or 5/5.** Zero findings only shows the agent reported nothing. The score records whether it believes coverage and verification were sufficient. A 3/5 review with no findings goes to a person.
 
-`--confidence` is a required integer flag. It must match the score written in the published review context. The CLI refuses below 4 before contacting the service, and the service refuses it again.
+`--confidence` is a required integer flag on `publish`. The service renders it into the comment and applies the stamp threshold to it.
 
-Deterministic refusals, which also send a PR to a person: binary changes, files without text patches, protected paths (review config, the Benedict skill, `src/stamp*.ts` and `stamp.denyPaths`), more than `stamp.maxChangedLines`, draft or closed PRs, and stale or partial reviews.
+Deterministic stamp refusals, which also send a PR to a person: binary changes, files without text patches, protected paths (review config, the Benedict skill and `stamp.denyPaths`), more than `stamp.maxChangedLines`, draft PRs, and partial reviews. A refused stamp still publishes the review and is reported in the response. Closed PRs, stale heads and ranges outside the PR fail the whole request.
 
 ### GitHub App
 
-One organization-owned app, "Benedict", with **Pull requests: read and write**, **Contents: read** and **Metadata: read**. It has no webhook, user authorization or device flow. Install it on the repositories that should be stamped. The installation is the repository allowlist; the base-branch `stamp.enabled` setting is a second, per-repository opt-in.
+One organization-owned app, "Benedict", with **Pull requests: read and write**, **Contents: read** and **Metadata: read**. It has no webhook, user authorization or device flow. Install it on the repositories it should review. The installation is the repository allowlist; the base-branch `stamp.enabled` setting is a second, per-repository opt-in for approvals.
 
-Approvals appear as `benedict[bot]`. The review body names the reviewed base and head, finding count, dropped draft count, confidence, and a link to the published review comment.
+Comments and approvals appear as `benedict[bot]`. The approval body names the reviewed base and head, finding count, dropped draft count, confidence, and a link to the review comment.
 
 Branch protection and rulesets decide whether the approval satisfies merge requirements. The bot approves whenever its gates pass. If the repository also requires code-owner review or another human approval, people handle that manually. Repositories should dismiss stale approvals so new commits require a new review and stamp.
 
 ### Service
 
-`benedict stamp serve` remains an Effect HTTP service, now stateless:
+`benedict serve` is a stateless Effect HTTP service:
 
 | Setting | Purpose |
 | --- | --- |
-| `STAMP_PUBLIC_URL` | Full HTTPS endpoint; must match each base branch's `stamp.service` |
-| `STAMP_KEY` | Shared approval key, at least 32 characters |
+| `BENEDICT_SERVICE_KEY` | Shared service key, at least 32 characters |
 | `GITHUB_APP_ID` | App ID |
 | `GITHUB_APP_PRIVATE_KEY` | App private key, from the host's secret manager |
 
 For each request, the service signs an app JWT with `node:crypto` (RS256, short expiry). It resolves `GET /repos/{owner}/{repo}/installation`, then mints an installation token limited to that repository and to `pull_requests: write` and `contents: read`. Tokens live only for the request.
 
-Idempotency comes from GitHub, not a database. Before writing, the service lists the PR's reviews:
+Idempotency comes from GitHub, not a database:
 
+- The app's marked comment is updated in place; identical content makes no write.
 - An active bot approval at the reviewed head returns `already-approved`.
 - A dismissed bot approval at that head is refused; someone withdrew it intentionally.
 - Otherwise it rechecks PR metadata and submits `APPROVE` with `commit_id` set to the head.
 
-Concurrent duplicate requests can at worst produce two approvals from the same bot. They count as one approval. After a timeout, the client can rerun the same command safely, because the service finds the earlier approval.
+Concurrent duplicate requests can at worst produce two app comments or two approvals from the same bot. Later runs keep the oldest comment current, and duplicate approvals count as one. After a timeout, the client can rerun the same command safely.
 
-`GET /api/health` stays unauthenticated. The enroll, users and remove routes, and the enroll and admin keys, are removed.
-
-### CLI
-
-- `benedict stamp approve` gains the required `--confidence <1-5>` flag and adds `confidence` and the published comment URL to the request. Otherwise it keeps its local gates, `--dry-run`, and the `BENEDICT_STAMP_URL`/`BENEDICT_STAMP_KEY` trust check.
-- The request becomes version 2. The service rejects version 1.
-- Remove `benedict stamp enroll`, `users` and `remove`.
-- Remove the obsolete `stamp.team` and `stamp.channel` config fields.
+`POST /api/reviews` is the only authenticated route. `GET /api/health` stays unauthenticated.
 
 ### Agent workflow
 
-Each repository's `AGENTS.md` requires the review on every PR. The skill's Stamp section changes from "only when the user asks" to "when the user or the repository's agent instructions require it." Suggested repository text:
+Each repository's `AGENTS.md` requires the review on every PR. Suggested repository text:
 
 ```md
 ## Benedict
@@ -131,28 +132,14 @@ If the stamp is refused, report the reason and request human review; do not
 approve the PR another way.
 ```
 
-`benedict setup` can later offer to add this section. Agents still never call `gh pr review --approve` directly.
-
-### Changes
-
-Delete: `src/stamp-store.ts`, `src/stamp-client.ts`, the enrollment and admin parts of `src/stamp-protocol.ts` and `src/stamp-server.ts`, the reviewer-pool loop in `src/stamp-service.ts`, OAuth in `src/stamp-github.ts`, the `@azure/data-tables` dependency, and their tests.
-
-Add or rewrite: app JWT and installation-token minting in `src/stamp-github.ts`, the stateless approve path in `src/stamp-service.ts`, version-2 protocol and confidence gate, `stamp-service/README.md` setup for the app, `references/stamp.md`, the skill's Stamp section, and README.
-
-Tests use fake GitHub responses and cover:
-
-- JWT claims and signature.
-- Installation-token scoping.
-- Every refusal.
-- Confidence below 4.
-- `already-approved`, a dismissed approval, and retry after a timeout.
+`benedict setup` can later offer to add this section. Agents never call `gh pr review --approve` directly.
 
 ### Rollout
 
 1. On a scratch repository with required approvals, confirm a GitHub App approval counts toward the required review count.
 2. Create and install the app. Deploy the service behind HTTPS.
-3. Distribute `BENEDICT_STAMP_URL` and `BENEDICT_STAMP_KEY` through normal secret configuration.
-4. Run `--dry-run`, then one real stamp on a test PR.
+3. Distribute `BENEDICT_SERVICE_URL` and `BENEDICT_SERVICE_KEY` through normal secret configuration.
+4. Run `publish --dry-run`, then one real publish and stamp on a test PR.
 5. Enable `stamp` in pilot repositories' base-branch config and add the `AGENTS.md` section.
 
-Accepted trade-off: an approval is attested by the requester's local agent. A key holder can stamp their own PR with an empty findings file. The base-branch gates, bot attribution, published review comment and stale-approval dismissal limit and expose that. They do not prevent it. Rotate `STAMP_KEY` when someone leaves.
+Accepted trade-offs: an approval is attested by the requester's local agent. A key holder can stamp their own PR with an empty findings file, and can post any review text as the bot. The base-branch gates, bot attribution, the published review comment and stale-approval dismissal limit and expose that. They do not prevent it. With a shared key the service cannot tell which developer published. Rotate `BENEDICT_SERVICE_KEY` when someone leaves.

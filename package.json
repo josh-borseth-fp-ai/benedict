@@ -11,7 +11,7 @@
     "dist",
     ".agents/skills/benedict",
     "schemas",
-    "stamp-service",
+    "app-service",
     "README.md"
   ],
   "scripts": {

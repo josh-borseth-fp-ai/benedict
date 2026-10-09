@@ -10,8 +10,7 @@ import { resolvePullRequest } from "./pull-request.js"
 import { ReviewError, configPath, lockPath } from "./model.js"
 import type { CheckReport, ReviewContext, ReviewOptions } from "./model.js"
 import { setup } from "./setup.js"
-import { stampReview } from "./stamp.js"
-import { serveStamp } from "./stamp-server.js"
+import { serve } from "./app-server.js"
 import { repositoryRoot, syncOrganization } from "./sync.js"
 
 const rangeFlags = {
@@ -122,7 +121,9 @@ const publishCommand = Command.make("publish", {
   findings: Argument.String("findings").pipe(Argument.withDescription("Draft findings JSON; revalidated before posting")),
   pr: Flag.String("pr").pipe(Flag.withDescription("Full https://github.com/OWNER/REPO/pull/NUMBER URL")),
   contextFile: Flag.String("context-file").pipe(Flag.optional, Flag.withDescription("Markdown file with useful review context")),
-  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Render the exact comment without writing to GitHub; reads PR metadata"))
+  confidence: Flag.Int("confidence").pipe(Flag.withDescription("Overall merge confidence (1-5); stamping requires 4 or 5")),
+  stamp: Flag.Boolean("stamp").pipe(Flag.withDefault(false), Flag.withDescription("Also ask the Benedict GitHub App to approve a clean whole-PR review")),
+  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Render the exact comment without contacting the Benedict service; reads PR metadata"))
 }, Effect.fn(function*(flags) {
   const result = yield* publishReview({
     findings: flags.findings,
@@ -132,46 +133,29 @@ const publishCommand = Command.make("publish", {
     head: Option.getOrUndefined(flags.head),
     config: Option.getOrUndefined(flags.config),
     contextFile: Option.getOrUndefined(flags.contextFile),
+    confidence: flags.confidence,
+    stamp: flags.stamp,
     dryRun: flags.dryRun
   })
-  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : `${result.action}: ${result.commentUrl ?? result.pr}\n\n${result.body}`)
-})).pipe(Command.withDescription("Publish validated findings and context as an AI-labeled PR comment via gh."))
+  const stamp = result.stamp === null ? [] : [result.stamp.action === "refused"
+    ? `stamp refused (${result.stamp.code}): ${result.stamp.message}`
+    : `stamp ${result.stamp.action}: ${result.stamp.url}`]
+  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : [`${result.action}: ${result.commentUrl ?? result.pr}`, ...stamp, "", result.body].join("\n"))
+  // A requested stamp that was refused still published the review; exit 1 tells the agent to request human review.
+  yield* Effect.sync(() => { process.exitCode = result.stamp?.action === "refused" ? 1 : 0 })
+})).pipe(Command.withDescription("Post validated findings and context as the Benedict GitHub App, and optionally stamp the PR."))
 
-const stampApproveCommand = Command.make("approve", {
-  repo: rangeFlags.repo,
-  base: Flag.String("base").pipe(Flag.withDescription("Resolved whole-PR merge base that was reviewed")),
-  head: Flag.String("head").pipe(Flag.withDescription("Resolved PR head that was reviewed")),
-  config: rangeFlags.config,
-  format: rangeFlags.format,
-  findings: Argument.String("findings").pipe(Argument.withDescription("Draft findings JSON; checked again before stamping")),
-  pr: Flag.String("pr").pipe(Flag.withDescription("Full GitHub PR URL")),
-  confidence: Flag.Int("confidence").pipe(Flag.withDescription("Overall merge confidence (1-5) stated in the published review; stamping requires 4 or 5")),
-  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Check and preview the request without calling the stamp service"))
-}, Effect.fn(function*(flags) {
-  const result = yield* stampReview({
-    repo: flags.repo, base: flags.base, head: flags.head,
-    config: Option.getOrUndefined(flags.config), findings: flags.findings,
-    pr: flags.pr, confidence: flags.confidence, dryRun: flags.dryRun
-  })
-  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) :
-    `${result.action}: ${result.reviewUrl ?? result.pr}\nReviewed head: ${result.head}`)
-})).pipe(Command.withDescription("Approve a clean, published whole-PR review through the Benedict GitHub App service."))
-
-const stampServeCommand = Command.make("serve", {
+const serveCommand = Command.make("serve", {
   host: Flag.String("host").pipe(Flag.withDefault("127.0.0.1")),
   port: Flag.Int("port").pipe(Flag.withDefault(8080))
 }, Effect.fn(function*(flags) {
   if (flags.port < 1 || flags.port > 65535) return yield* Effect.fail(new Error("--port must be between 1 and 65535."))
-  yield* serveStamp(flags.host, flags.port)
-})).pipe(Command.withDescription("Run the stateless HTTP approval service for the Benedict GitHub App."))
-const stampCommand = Command.make("stamp").pipe(
-  Command.withDescription("Approve reviewed PRs through the Benedict GitHub App."),
-  Command.withSubcommands([stampApproveCommand, stampServeCommand])
-)
+  yield* serve(flags.host, flags.port)
+})).pipe(Command.withDescription("Run the stateless Benedict service that posts reviews and approvals as the GitHub App."))
 
 export const benedictCommand = Command.make("benedict").pipe(
   Command.withDescription("Benedict: deterministic code review tools for coding agents."),
-  Command.withSubcommands([contextCommand, checkCommand, publishCommand, stampCommand, syncCommand, setupCommand])
+  Command.withSubcommands([contextCommand, checkCommand, publishCommand, serveCommand, syncCommand, setupCommand])
 )
 
 export const run = Command.run(benedictCommand, { version: "0.1.0" }).pipe(

@@ -92,10 +92,10 @@ test("context resolves immutable commits and provides exact patches and policy",
 
 test("review commands accept stamp configuration without weakening review policy", (t) => {
   const { repo, context, check, run } = fixture(t)
-  configure(repo, { skills: ["security"], stamp: { enabled: true, service: "https://stamp.example.invalid/api/stamp", denyPaths: ["infra/**"], maxChangedLines: 100 } })
+  configure(repo, { skills: ["security"], stamp: { enabled: true, denyPaths: ["infra/**"], maxChangedLines: 100 } })
   assert.deepEqual(context().config.skills, ["security"])
   assert.equal(check([]).summary.accepted, 0)
-  for (const stamp of [{ enabled: "yes" }, { maxChangedLines: 0 }, { unknownOption: true }, { team: "Engineering" }]) {
+  for (const stamp of [{ enabled: "yes" }, { maxChangedLines: 0 }, { unknownOption: true }, { service: "https://benedict.example.invalid" }]) {
     configure(repo, { stamp })
     assert.equal(run("context").status, 2)
   }
