@@ -2,25 +2,21 @@ import { Context, Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ReviewError } from "./model.js"
 
-/** GitHub authentication stays with gh; Benedict never reads credentials. */
+/** Reads GitHub as the developer through gh, which owns authentication. The Benedict GitHub App makes every write. */
 export class GitHub extends Context.Service<GitHub, {
-  readonly request: (method: "GET" | "POST" | "PATCH", endpoint: string, body?: unknown) => Effect.Effect<unknown, ReviewError>
+  readonly request: (endpoint: string) => Effect.Effect<unknown, ReviewError>
 }>()("benedict/GitHub") {
   static readonly layer = Layer.effect(GitHub, Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const request = Effect.fn("GitHub.request")(function*(method: "GET" | "POST" | "PATCH", endpoint: string, body?: unknown) {
-      const writing = method !== "GET"
-      const advice = writing
-        ? "The write may have reached GitHub. Inspect the PR comment before retrying; writes are not automatically retried."
-        : "Check that gh is installed, signed in to github.com, and can access the PR."
+    const request = Effect.fn("GitHub.request")(function*(endpoint: string) {
+      const advice = "Check that gh is installed, signed in to github.com, and can access the PR."
       const command = ChildProcess.make("gh", [
-        "api", "--hostname", "github.com", "--method", method,
-        "--header", "Accept: application/vnd.github+json", endpoint,
-        ...(body === undefined ? [] : ["--input", "-"])
+        "api", "--hostname", "github.com", "--method", "GET",
+        "--header", "Accept: application/vnd.github+json", endpoint
       ], {
         env: { GH_PROMPT_DISABLED: "1", GH_DEBUG: "", GH_PAGER: "cat" },
         extendEnv: true,
-        stdin: body === undefined ? "ignore" : Stream.make(new TextEncoder().encode(JSON.stringify(body)))
+        stdin: "ignore"
       })
       const result = yield* Effect.scoped(Effect.gen(function*() {
         const handle = yield* spawner.spawn(command)
@@ -35,7 +31,7 @@ export class GitHub extends Context.Service<GitHub, {
         Effect.mapError((error) => new ReviewError({ code: "github_error", message: `Cannot run gh api: ${String(error)}. ${advice}` }))
       )
       if (result.exitCode !== 0) {
-        return yield* new ReviewError({ code: "github_error", message: `gh api ${method} failed: ${result.stderr.trim()}. ${advice}` })
+        return yield* new ReviewError({ code: "github_error", message: `gh api failed: ${result.stderr.trim()}. ${advice}` })
       }
       return yield* Effect.try({
         try: () => JSON.parse(result.stdout) as unknown,

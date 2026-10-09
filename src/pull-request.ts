@@ -2,7 +2,7 @@ import { Effect, Schema } from "effect"
 import { Git } from "./git.js"
 import { GitHub } from "./github.js"
 import { ReviewError } from "./model.js"
-import { parsePullRequest } from "./publish.js"
+import { parsePullRequest } from "./comment.js"
 
 const Sha = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))
 const PullRequest = Schema.Struct({
@@ -32,7 +32,7 @@ export const resolvePullRequest = Effect.fn("Review.resolvePullRequest")(functio
   const target = yield* Effect.try({ try: () => parsePullRequest(url), catch: (error) => fail("input_error", String(error)) })
   const gh = yield* GitHub
   const git = yield* Git
-  const pr = yield* gh.request("GET", `repos/${target.repository}/pulls/${target.number}`).pipe(
+  const pr = yield* gh.request(`repos/${target.repository}/pulls/${target.number}`).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(PullRequest)),
     Effect.mapError((error) => error instanceof ReviewError ? error : fail("github_error", "GitHub returned unexpected PR metadata."))
   )
