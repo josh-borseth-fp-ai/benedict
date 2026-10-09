@@ -46,8 +46,6 @@ export const ConfigFile = Schema.Struct({
   stamp: Schema.optional(Schema.Struct({
     enabled: Schema.optional(Schema.Boolean),
     service: Schema.optional(NonBlank),
-    team: Schema.optional(NonBlank),
-    channel: Schema.optional(NonBlank),
     denyPaths: Schema.optional(Schema.Array(NonBlank)),
     maxChangedLines: Schema.optional(PositiveInt)
   }))
