@@ -6,6 +6,8 @@ export class StampError extends Data.TaggedError("StampError")<{
   readonly status: number
 }> {}
 export const stampError = (code: string, message: string, status = 409) => new StampError({ code, message, status })
+/** A PR cannot stamp changes to review policy, its organization lock, or the stamping workflow itself. */
+export const protectedPaths = [".review/**", ".agents/skills/review/**", "stamp-service/**", "src/stamp*.ts"]
 export const Sha = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 export const StampReport = Schema.Struct({

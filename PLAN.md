@@ -12,7 +12,7 @@ The skill guides investigation: read the change, trace related code, apply corre
 
 `review setup` installs the bundled skill through Vercel's skills CLI, optionally connects a repository to organization knowledge, and records its initial revision. `review sync` restores that locked revision into a local cache; `--update` explicitly adopts a newer version.
 
-Repository policy and Markdown knowledge live alongside the code. Organization defaults, required constraints, and shared documents live in an organization-owned Git repository. `.review/knowledge.lock.json` records the selected source and commit. Review commands use that exact cache offline and include its revision in their output.
+Repository policy (`.review/config.json`) and Markdown knowledge live alongside the code. Organization defaults, required constraints, and shared documents live in an organization-owned Git repository's `.review/organization.json`, using the same policy field names. `.review/knowledge.lock.json` records the selected source and commit. Review commands use that exact cache offline and include its revision in their output.
 
 `review publish` reuses that validator, renders a fixed AI attribution, verifies the PR range, and creates or updates an owned automation comment through GitHub CLI. The skill selects useful findings and context; deterministic code owns formatting, destination checks, and API operations.
 

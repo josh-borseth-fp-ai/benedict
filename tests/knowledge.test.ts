@@ -17,6 +17,9 @@ const write = (repo: string, file: string, content: string) => {
   mkdirSync(dirname(join(repo, file)), { recursive: true })
   writeFileSync(join(repo, file), content)
 }
+const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n"
+const repoConfig = (repo: string, config: Record<string, unknown>) => write(repo, ".review/config.json", json(config))
+const manifest = (organization: string, value: Record<string, unknown>) => write(organization, ".review/organization.json", json(value))
 const commit = (repo: string, message: string) => { git(repo, "add", "."); git(repo, "commit", "--quiet", "-m", message); return git(repo, "rev-parse", "HEAD") }
 const init = (repo: string) => {
   mkdirSync(repo, { recursive: true })
@@ -40,7 +43,11 @@ const fixture = (t: TestContext) => {
   write(repo, "src.ts", "after();\n")
   commit(repo, "head")
   init(organization)
-  write(organization, "review.yaml", 'defaults:\n  minimumConfidence: 0.8\n  rules: ["Org default"]\nrequired:\n  skills: [security]\n  minimumConfidence: 0.75\n  minimumSeverity: medium\n  rules: ["Never log credentials."]\nknowledge: [knowledge/engineering.md]\n')
+  manifest(organization, {
+    defaults: { minimumConfidence: 0.8, rules: ["Org default"] },
+    required: { skills: ["security"], minimumConfidence: 0.75, minimumSeverity: "medium", rules: ["Never log credentials."] },
+    knowledge: ["knowledge/engineering.md"]
+  })
   write(organization, "knowledge/engineering.md", "Use Effect services at system boundaries.\n")
   const revision = commit(organization, "initial approved knowledge")
   const env = {
@@ -54,7 +61,7 @@ const fixture = (t: TestContext) => {
     assert.equal(result.status, 0, result.stderr)
     return JSON.parse(result.stdout) as ReviewContext
   }
-  const configure = (extra: Record<string, unknown> = {}) => write(repo, "review.json", JSON.stringify({ organization: { source: organization }, ...extra }, null, 2))
+  const configure = (extra: Record<string, unknown> = {}) => repoConfig(repo, { organization: { source: organization }, ...extra })
   const sync = (...args: string[]) => {
     const result = run("sync", ...args)
     assert.equal(result.status, 0, result.stderr)
@@ -67,9 +74,32 @@ const fixture = (t: TestContext) => {
 test("repo knowledge loads without an organization and text context shows its content", (t) => {
   const { repo, run, context } = fixture(t)
   write(repo, "docs/architecture.md", "Keep domain logic separate from IO.\n")
-  write(repo, "review.yaml", "knowledge: [docs/architecture.md]\n")
+  repoConfig(repo, { knowledge: ["docs/architecture.md"] })
   assert.deepEqual(context().config.knowledge, [{ scope: "repository", path: "docs/architecture.md", content: "Keep domain logic separate from IO.\n" }])
   assert.match(run("context", "--format", "text").stdout, /Keep domain logic separate from IO/)
+})
+
+test("the organization repository can be reviewed with its own repo config", (t) => {
+  const { organization, env } = fixture(t)
+  repoConfig(organization, { skills: ["correctness"], knowledge: ["knowledge/engineering.md"] })
+  write(organization, "knowledge/engineering.md", "Reviewed guidance.\n")
+  commit(organization, "review the organization repository")
+  const result = spawnSync(process.execPath, [cli, "context"], { cwd: organization, env, encoding: "utf8" })
+  assert.equal(result.status, 0, result.stderr)
+  const context = JSON.parse(result.stdout) as ReviewContext
+  assert.deepEqual(context.config.skills, ["correctness"])
+  assert.deepEqual(context.files.map((file) => file.path), [".review/config.json", "knowledge/engineering.md"])
+})
+
+test("sync requires the organization manifest at .review/organization.json", (t) => {
+  const { organization, configure, run, lockPath } = fixture(t)
+  git(organization, "mv", ".review/organization.json", "review.json")
+  commit(organization, "legacy manifest name")
+  configure()
+  const result = run("sync")
+  assert.equal(result.status, 2)
+  assert.match(JSON.parse(result.stderr).error.message, /\.review\/organization\.json/)
+  assert.equal(existsSync(lockPath), false)
 })
 
 test("sync pins organization knowledge and context loads both scopes and policy", (t) => {
@@ -137,7 +167,7 @@ test("required lenses survive path narrowing and conflicting repo thresholds fai
   configure({ paths: [{ pattern: "*.ts", skills: [] }] })
   sync()
   assert.deepEqual(context().files[0]?.skills, ["security"])
-  for (const override of [{ skills: ["correctness"] }, { minimumConfidence: 0.5 }, { severity: { minimum: "low" } }]) {
+  for (const override of [{ skills: ["correctness"] }, { minimumConfidence: 0.5 }, { minimumSeverity: "low" }]) {
     configure(override)
     const locked = readFileSync(lockPath, "utf8")
     const result = run("context")
@@ -167,7 +197,7 @@ test("failed organization updates retain the previous working lock", (t) => {
   configure()
   sync()
   const before = readFileSync(lockPath, "utf8")
-  write(organization, "review.yaml", "knowledge: [../outside.md]\n")
+  manifest(organization, { knowledge: ["../outside.md"] })
   commit(organization, "bad knowledge path")
   const result = run("sync", "--update")
   assert.equal(result.status, 2)
@@ -180,12 +210,12 @@ test("local and organization knowledge cannot follow symlinks or traverse paths"
   const external = join(area, "private.md")
   writeFileSync(external, "Outside knowledge boundary")
   symlinkSync(external, join(repo, "link.md"))
-  write(repo, "review.json", JSON.stringify({ knowledge: ["link.md"] }))
+  repoConfig(repo, { knowledge: ["link.md"] })
   assert.equal(run("context").status, 2)
-  write(repo, "review.json", JSON.stringify({ knowledge: ["../private.md"] }))
+  repoConfig(repo, { knowledge: ["../private.md"] })
   assert.equal(run("context").status, 2)
   symlinkSync(external, join(organization, "link.md"))
-  write(organization, "review.yaml", "knowledge: [link.md]\n")
+  manifest(organization, { knowledge: ["link.md"] })
   commit(organization, "external link")
   configure()
   assert.equal(run("sync").status, 2)
@@ -196,7 +226,7 @@ test("source/ref mismatch, malformed locks and unsupported transports fail close
   const { repo, configure, sync, run, lockPath, organization } = fixture(t)
   configure()
   sync()
-  write(repo, "review.json", JSON.stringify({ organization: { source: organization, ref: "main" } }))
+  repoConfig(repo, { organization: { source: organization, ref: "main" } })
   assert.equal(run("context").status, 2)
   assert.equal(run("sync").status, 2)
   configure()
@@ -204,7 +234,7 @@ test("source/ref mismatch, malformed locks and unsupported transports fail close
   assert.equal(run("context").status, 2)
   rmSync(lockPath)
   for (const source of ["ext::sh -c anything", "https://user:password@example.com/repo.git", "--upload-pack=anything"]) {
-    write(repo, "review.json", JSON.stringify({ organization: { source } }))
+    repoConfig(repo, { organization: { source } })
     assert.equal(run("sync").status, 2)
   }
 })
@@ -224,10 +254,12 @@ test("knowledge cache cannot be placed in the reviewed repo, including through a
 
 test("setup connects organization knowledge while preserving existing repo config", (t) => {
   const { repo, run, organization, revision, lockPath, context } = fixture(t)
-  write(repo, "review.yaml", "# Local review policy\nminimumConfidence: 0.9\n")
+  repoConfig(repo, { $schema: "https://example.invalid/config.schema.json", minimumConfidence: 0.9 })
   const result = run("setup", "--organization", organization, "--skip-skills")
   assert.equal(result.status, 0, result.stderr)
-  assert.match(readFileSync(join(repo, "review.yaml"), "utf8"), /# Local review policy/)
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, ".review/config.json"), "utf8")), {
+    $schema: "https://example.invalid/config.schema.json", minimumConfidence: 0.9, organization: { source: organization, ref: "HEAD" }
+  })
   assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).revision, revision)
   assert.equal(context().config.minimumConfidence, 0.9)
   const before = readFileSync(lockPath, "utf8")
@@ -237,10 +269,10 @@ test("setup connects organization knowledge while preserving existing repo confi
 
 test("setup errors preserve config and require explicit non-interactive agent selection", (t) => {
   const { repo, run, lockPath } = fixture(t)
-  write(repo, "review.json", '{"rules":["Local rule"]}\n')
-  const before = readFileSync(join(repo, "review.json"), "utf8")
+  write(repo, ".review/config.json", '{"rules":["Local rule"]}\n')
+  const before = readFileSync(join(repo, ".review/config.json"), "utf8")
   assert.equal(run("setup", "--organization", "https://user:secret@example.invalid/repo", "--skip-skills").status, 2)
-  assert.equal(readFileSync(join(repo, "review.json"), "utf8"), before)
+  assert.equal(readFileSync(join(repo, ".review/config.json"), "utf8"), before)
   assert.equal(existsSync(lockPath), false)
   assert.equal(run("setup", "--yes").status, 2)
   assert.equal(run("setup", "--global", "--project", "--skip-skills").status, 2)
@@ -253,7 +285,7 @@ test("setup installs the bundled skill and reference through Vercel into isolate
   const skill = join(home, ".claude/skills/review")
   assert.match(readFileSync(join(skill, "SKILL.md"), "utf8"), /name: review/)
   assert.equal(readFileSync(join(skill, "references/cli.md"), "utf8"), readFileSync(fileURLToPath(new URL("../.agents/skills/review/references/cli.md", import.meta.url)), "utf8"))
-  assert.equal(existsSync(join(repo, "review.yaml")), false)
+  assert.equal(existsSync(join(repo, ".review")), false)
   assert.equal(existsSync(join(repo, ".review/knowledge.lock.json")), false)
   assert.equal(run("setup", "--agent", "claude-code", "--yes").status, 0)
 })
@@ -271,15 +303,15 @@ test("setup supports project skill installation and user installation outside Gi
 
 test("failed skill installation leaves organization declaration and lock untouched", (t) => {
   const { repo, home, organization, run, lockPath } = fixture(t)
-  const config = "rules: [Keep this rule.]\n"
-  write(repo, "review.yaml", config)
+  const config = json({ rules: ["Keep this rule."] })
+  write(repo, ".review/config.json", config)
   // Block both the canonical directory and the agent's fallback copy target.
   write(home, ".agents/skills", "blocked")
   write(home, ".claude/skills", "blocked")
   const result = run("setup", "--organization", organization, "--agent", "claude-code", "--yes")
   assert.equal(result.status, 2)
   assert.match(result.stderr, /setup_error/)
-  assert.equal(readFileSync(join(repo, "review.yaml"), "utf8"), config)
+  assert.equal(readFileSync(join(repo, ".review/config.json"), "utf8"), config)
   assert.equal(existsSync(lockPath), false)
 })
 
@@ -291,10 +323,10 @@ test("concurrent syncs sharing a cache pin each repository's selected ref", asyn
   write(organization, "knowledge/engineering.md", "Guidance on the other ref.\n")
   const next = commit(organization, "newer guidance")
   git(organization, "branch", "next", next)
-  write(repo, "review.json", JSON.stringify({ organization: { source: organization, ref: "approved" } }))
+  repoConfig(repo, { organization: { source: organization, ref: "approved" } })
   const other = join(area, "other-project")
   init(other)
-  write(other, "review.json", JSON.stringify({ organization: { source: organization, ref: "next" } }))
+  repoConfig(other, { organization: { source: organization, ref: "next" } })
   for (const coldCache of [false, true]) {
     if (coldCache) rmSync(cache, { recursive: true })
     await Promise.all([repo, other].map((cwd) => promisify(execFile)(process.execPath, [cli, "sync", "--update"], { cwd, env })))

@@ -2,14 +2,17 @@
 
 The organization runs the shared Effect stamp service once with `review stamp serve`. Reviewers opt in with `review stamp enroll` and authorize GitHub's device code. Each developer configures the trusted endpoint as `REVIEW_STAMP_URL` and the approval key as `REVIEW_STAMP_KEY`; never put the key in review config, findings or conversation output. The base branch's endpoint must match the trusted local URL before the key can be sent.
 
-The base branch configures:
+The base branch's `.review/config.json` configures:
 
-```yaml
-stamp:
-  enabled: true
-  service: https://review.example.com/api/stamp
-  denyPaths: ["infra/**", ".github/workflows/**"]
-  maxChangedLines: 400
+```json
+{
+  "stamp": {
+    "enabled": true,
+    "service": "https://review.example.com/api/stamp",
+    "denyPaths": ["infra/**", ".github/workflows/**"],
+    "maxChangedLines": 400
+  }
+}
 ```
 
 Use the original findings file and the same committed whole-PR range and config:

@@ -52,14 +52,17 @@ The list contains usernames and GitHub IDs only. Removal deletes the enrollment;
 
 ## Stamping behavior
 
-Stamp callers configure `REVIEW_STAMP_URL` and `REVIEW_STAMP_KEY` (the service's `STAMP_KEY`). Each repository authorizes the same endpoint on its base branch:
+Stamp callers configure `REVIEW_STAMP_URL` and `REVIEW_STAMP_KEY` (the service's `STAMP_KEY`). Each repository authorizes the same endpoint in `.review/config.json` on its base branch:
 
-```yaml
-stamp:
-  enabled: true
-  service: https://review.example.com/api/stamp
-  denyPaths: ["infra/**", ".github/workflows/**"]
-  maxChangedLines: 400
+```json
+{
+  "stamp": {
+    "enabled": true,
+    "service": "https://review.example.com/api/stamp",
+    "denyPaths": ["infra/**", ".github/workflows/**"],
+    "maxChangedLines": 400
+  }
+}
 ```
 
 After a clean whole-PR review:

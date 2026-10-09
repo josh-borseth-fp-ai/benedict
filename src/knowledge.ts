@@ -2,12 +2,10 @@ import { createHash } from "node:crypto"
 import { homedir } from "node:os"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { Git } from "./git.js"
-import { KnowledgeLock, OrganizationManifest, ReviewError } from "./model.js"
+import { KnowledgeLock, OrganizationManifest, ReviewError, lockPath, organizationManifestPath } from "./model.js"
 import type { KnowledgeDocument, OrganizationBundle, OrganizationReference } from "./model.js"
-import { parseConfig, relativeDocumentPath } from "./policy.js"
+import { parseJson, relativeDocumentPath } from "./policy.js"
 
-export const lockRelativePath = ".review/knowledge.lock.json"
-const configNames = ["review.yaml", "review.yml", "review.json"]
 const knowledgeFailure = (error: unknown) => error instanceof ReviewError ? error : new ReviewError({ code: "knowledge_error", message: String(error) })
 
 export const resolveOrganization = Effect.fn("Knowledge.resolveSource")(function*(root: string, organization: OrganizationReference) {
@@ -61,32 +59,46 @@ export const cacheDirectory = Effect.fn("Knowledge.cacheDirectory")(function*(ro
 export const readLock = Effect.fn("Knowledge.readLock")(function*(root: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const file = path.join(root, lockRelativePath)
+  const file = path.join(root, lockPath)
   if (!(yield* fs.exists(file))) return null
   const realRoot = yield* fs.realPath(root)
   const realFile = yield* fs.realPath(file)
-  if (realFile !== path.join(realRoot, lockRelativePath)) {
+  if (realFile !== path.join(realRoot, lockPath)) {
     return yield* new ReviewError({ code: "knowledge_error", message: "Knowledge lock files cannot use symlinks." })
   }
   const text = yield* fs.readFileString(file)
-  const parsed = yield* parseConfig(text, file)
+  const parsed = yield* parseJson(text, file)
   return yield* Schema.decodeUnknownEffect(KnowledgeLock, { onExcessProperty: "error" })(parsed).pipe(Effect.mapError(knowledgeFailure))
 })
 
-export const writeLock = Effect.fn("Knowledge.writeLock")(function*(root: string, lock: KnowledgeLock) {
+/** Creates `.review/` for CLI-owned state and refuses a symlinked directory. */
+export const reviewDirectory = Effect.fn("Knowledge.reviewDirectory")(function*(root: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const directory = path.join(root, ".review")
+  const directory = path.join(root, path.dirname(lockPath))
   yield* fs.makeDirectory(directory, { recursive: true })
-  if ((yield* fs.realPath(directory)) !== path.join(yield* fs.realPath(root), ".review")) {
+  if ((yield* fs.realPath(directory)) !== path.join(yield* fs.realPath(root), path.dirname(lockPath))) {
     return yield* new ReviewError({ code: "knowledge_error", message: "The .review directory cannot be a symlink." })
   }
+  return directory
+})
+
+/** Replaces a file atomically through a temporary sibling directory. */
+export const writeAtomically = Effect.fn("Knowledge.writeAtomically")(function*(target: string, text: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   yield* Effect.scoped(Effect.gen(function*() {
-    const temporary = yield* fs.makeTempDirectoryScoped({ directory, prefix: ".lock-" })
-    const file = path.join(temporary, "knowledge.lock.json")
-    yield* fs.writeFileString(file, JSON.stringify(lock, null, 2) + "\n")
-    yield* fs.rename(file, path.join(root, lockRelativePath))
+    const temporary = yield* fs.makeTempDirectoryScoped({ directory: path.dirname(target), prefix: ".review-write-" })
+    const file = path.join(temporary, path.basename(target))
+    yield* fs.writeFileString(file, text)
+    yield* fs.rename(file, target)
   }))
+})
+
+export const writeLock = Effect.fn("Knowledge.writeLock")(function*(root: string, lock: KnowledgeLock) {
+  const path = yield* Path.Path
+  yield* reviewDirectory(root)
+  yield* writeAtomically(path.join(root, lockPath), JSON.stringify(lock, null, 2) + "\n")
 })
 
 const validateContent = (content: string, file: string): string => {
@@ -125,16 +137,11 @@ export const readOrganizationBundle = Effect.fn("Knowledge.readOrganization")(fu
   yield* git.run(cache, ["cat-file", "-e", `${lock.revision}^{commit}`]).pipe(Effect.mapError(() => new ReviewError({
     code: "knowledge_unavailable", message: "The locked organization revision is unavailable. Run review sync to populate the cache."
   })))
-  const manifests = yield* Effect.forEach(configNames, Effect.fn(function*(name) {
-    const text = yield* readBlob(name, false)
-    return { name, text }
-  }))
-  const present = manifests.filter((candidate) => candidate.text !== null)
-  if (present.length !== 1) {
-    return yield* new ReviewError({ code: "knowledge_error", message: "Organization repository must contain exactly one review.yaml, review.yml, or review.json manifest." })
+  const text = yield* readBlob(organizationManifestPath, false)
+  if (text === null) {
+    return yield* new ReviewError({ code: "knowledge_error", message: `Organization repository must contain ${organizationManifestPath} at ${lock.revision}.` })
   }
-  const selected = present[0]!
-  const parsed = yield* parseConfig(selected.text!, selected.name)
+  const parsed = yield* parseJson(text, organizationManifestPath)
   const manifest = yield* Schema.decodeUnknownEffect(OrganizationManifest, { onExcessProperty: "error" })(parsed).pipe(Effect.mapError(knowledgeFailure))
   const knowledge = yield* Effect.forEach([...new Set(manifest.knowledge ?? [])], Effect.fn(function*(name) {
     const file = yield* Effect.try({ try: () => relativeDocumentPath(name), catch: knowledgeFailure })
@@ -150,7 +157,7 @@ export const loadOrganization = Effect.fn("Knowledge.loadLocked")(function*(root
   const resolved = yield* resolveOrganization(root, organization)
   const lock = yield* readLock(root)
   if (!lock || lock.source !== resolved.source || lock.ref !== resolved.ref) {
-    return yield* new ReviewError({ code: "knowledge_unavailable", message: "Organization knowledge has no matching lock. Run review sync (or review sync --update after changing the source/ref), then commit .review/knowledge.lock.json." })
+    return yield* new ReviewError({ code: "knowledge_unavailable", message: `Organization knowledge has no matching lock. Run review sync (or review sync --update after changing the source/ref), then commit ${lockPath}.` })
   }
   const cache = yield* cacheDirectory(root, lock.source)
   if (!(yield* fs.exists(cache))) {

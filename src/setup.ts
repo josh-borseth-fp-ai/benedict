@@ -3,10 +3,9 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { stripVTControlCharacters } from "node:util"
 import { Effect, FileSystem, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { parseDocument } from "yaml"
 import { readRepositoryConfig } from "./config.js"
-import { readLock, readRepositoryKnowledge, resolveOrganization, writeLock } from "./knowledge.js"
-import { ReviewError } from "./model.js"
+import { readLock, readRepositoryKnowledge, resolveOrganization, reviewDirectory, writeAtomically, writeLock } from "./knowledge.js"
+import { ReviewError, configPath } from "./model.js"
 import type { ConfigFile, KnowledgeLock } from "./model.js"
 import { resolvePolicy } from "./policy.js"
 import { prepareOrganization, repositoryRoot } from "./sync.js"
@@ -60,25 +59,11 @@ export const installSkill = Effect.fn("Setup.installSkill")(function*(cwd: strin
 const saveDeclaration = Effect.fn("Setup.saveDeclaration")(function*(root: string, source: string | null, decoded: ConfigFile) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const target = source ?? path.join(root, "review.yaml")
-  if (yield* fs.exists(target)) {
-    if ((yield* fs.realPath(target)) !== path.resolve(target)) {
-      return yield* new ReviewError({ code: "setup_error", message: "Setup cannot edit a symlinked config file." })
-    }
+  const target = source ?? path.join(yield* reviewDirectory(root), path.basename(configPath))
+  if ((yield* fs.exists(target)) && (yield* fs.realPath(target)) !== path.resolve(target)) {
+    return yield* new ReviewError({ code: "setup_error", message: "Setup cannot edit a symlinked config file." })
   }
-  const text = target.endsWith(".json") ? JSON.stringify(decoded, null, 2) + "\n" : yield* Effect.gen(function*() {
-    const existing = source === null ? "" : yield* fs.readFileString(target)
-    const document = parseDocument(existing)
-    if (!document.contents) return `organization:\n  source: ${JSON.stringify(decoded.organization!.source)}\n  ref: ${JSON.stringify(decoded.organization!.ref ?? "HEAD")}\n`
-    document.set("organization", decoded.organization)
-    return document.toString()
-  })
-  yield* Effect.scoped(Effect.gen(function*() {
-    const temporary = yield* fs.makeTempDirectoryScoped({ directory: path.dirname(target), prefix: ".review-config-" })
-    const file = path.join(temporary, "config")
-    yield* fs.writeFileString(file, text)
-    yield* fs.rename(file, target)
-  }))
+  yield* writeAtomically(target, JSON.stringify(decoded, null, 2) + "\n")
 })
 
 export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
@@ -86,7 +71,7 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
     return yield* new ReviewError({ code: "setup_error", message: "For non-interactive setup, select agents with --agent <name> (repeat as needed, or use --agent '*')." })
   }
   if (options.ref !== undefined && options.organization === undefined) {
-    return yield* new ReviewError({ code: "setup_error", message: "--ref requires --organization. Edit an existing organization ref in review.yaml and run review sync --update." })
+    return yield* new ReviewError({ code: "setup_error", message: `--ref requires --organization. Edit an existing organization ref in ${configPath} and run review sync --update.` })
   }
   const path = yield* Path.Path
   const location = yield* repositoryRoot(options.repo).pipe(Effect.result)

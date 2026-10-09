@@ -27,44 +27,47 @@ export const Finding = Schema.Struct({
 })
 export type Finding = typeof Finding.Type
 
+/** Repository paths owned by the review CLI. Every scope keeps its JSON state under `.review/`. */
+export const configPath = ".review/config.json"
+export const organizationManifestPath = ".review/organization.json"
+export const lockPath = ".review/knowledge.lock.json"
+const SchemaReference = { $schema: Schema.optionalKey(NonBlank) }
+
+export const RequiredPolicy = Schema.Struct({
+  skills: Schema.optionalKey(Schema.Array(Skill)),
+  minimumSeverity: Schema.optionalKey(Severity),
+  minimumConfidence: Schema.optionalKey(Confidence),
+  rules: Schema.optionalKey(Schema.Array(NonBlank))
+})
+export type RequiredPolicy = typeof RequiredPolicy.Type
 export const PolicyFields = {
-  skills: Schema.optional(Schema.Array(Skill)),
-  severity: Schema.optional(Schema.Struct({ minimum: Severity })),
-  paths: Schema.optional(Schema.Array(Schema.Struct({
+  ...RequiredPolicy.fields,
+  paths: Schema.optionalKey(Schema.Array(Schema.Struct({
     pattern: NonBlank,
     skills: Schema.Array(Skill)
-  }))),
-  rules: Schema.optional(Schema.Array(NonBlank)),
-  minimumConfidence: Schema.optional(Confidence)
+  })))
 }
-export const OrganizationReference = Schema.Struct({ source: NonBlank, ref: Schema.optional(NonBlank) })
+export const OrganizationReference = Schema.Struct({ source: NonBlank, ref: Schema.optionalKey(NonBlank) })
 export type OrganizationReference = typeof OrganizationReference.Type
 export const ConfigFile = Schema.Struct({
+  ...SchemaReference,
   ...PolicyFields,
-  knowledge: Schema.optional(Schema.Array(NonBlank)),
-  organization: Schema.optional(OrganizationReference),
-  stamp: Schema.optional(Schema.Struct({
-    enabled: Schema.optional(Schema.Boolean),
-    service: Schema.optional(NonBlank),
-    team: Schema.optional(NonBlank),
-    channel: Schema.optional(NonBlank),
-    denyPaths: Schema.optional(Schema.Array(NonBlank)),
-    maxChangedLines: Schema.optional(PositiveInt)
+  knowledge: Schema.optionalKey(Schema.Array(NonBlank)),
+  organization: Schema.optionalKey(OrganizationReference),
+  stamp: Schema.optionalKey(Schema.Struct({
+    enabled: Schema.optionalKey(Schema.Boolean),
+    service: Schema.optionalKey(NonBlank),
+    denyPaths: Schema.optionalKey(Schema.Array(NonBlank)),
+    maxChangedLines: Schema.optionalKey(PositiveInt)
   }))
 })
 export type ConfigFile = typeof ConfigFile.Type
 
-export const RequiredPolicy = Schema.Struct({
-  skills: Schema.optional(Schema.Array(Skill)),
-  minimumSeverity: Schema.optional(Severity),
-  minimumConfidence: Schema.optional(Confidence),
-  rules: Schema.optional(Schema.Array(NonBlank))
-})
-export type RequiredPolicy = typeof RequiredPolicy.Type
 export const OrganizationManifest = Schema.Struct({
-  defaults: Schema.optional(Schema.Struct(PolicyFields)),
-  required: Schema.optional(RequiredPolicy),
-  knowledge: Schema.optional(Schema.Array(NonBlank))
+  ...SchemaReference,
+  defaults: Schema.optionalKey(Schema.Struct(PolicyFields)),
+  required: Schema.optionalKey(RequiredPolicy),
+  knowledge: Schema.optionalKey(Schema.Array(NonBlank))
 })
 export type OrganizationManifest = typeof OrganizationManifest.Type
 

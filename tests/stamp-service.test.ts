@@ -39,7 +39,7 @@ const fixture = () => {
   const state = {
     pr: { state: "open", draft: false, head: { sha: head }, base: { sha: base }, user: { id: 1, login: "author" }, changed_files: 1 },
     mergeBase: base,
-    config: `stamp:\n  enabled: true\n  service: ${service}\n`,
+    config: JSON.stringify({ stamp: { enabled: true, service } }),
     files: [{ filename: "safe.ts", additions: 1, deletions: 1, patch: "@@ ..." }] as Array<{ filename: string; additions: number; deletions: number; patch?: string; previous_filename?: string }>,
     reviews: [] as Array<{ state: string; commit_id: string; html_url: string; user: { id: number; login: string }; body: string }>,
     writes: [] as Array<{ token: string; body: { commit_id: string; body: string; event: string } }>,
@@ -60,7 +60,7 @@ const fixture = () => {
         return state.unknownWrite ? Effect.fail(stampError("write_uncertain", "Lost response.", 502)) : Effect.succeed(review)
       }
       if (endpoint.includes("/compare/")) return Effect.succeed({ merge_base_commit: { sha: state.mergeBase } })
-      if (endpoint.includes("/contents/")) return endpoint.includes("review.yaml") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(stampError("github_not_found", "Not found.", 404))
+      if (endpoint.includes("/contents/")) return endpoint.includes("/contents/.review/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(stampError("github_not_found", "Not found.", 404))
       if (endpoint.includes("/files?")) return Effect.succeed(state.files)
       if (endpoint.includes("/reviews?")) { if (state.mutateAfterReviews) state.pr.head.sha = "c".repeat(40); return Effect.succeed(state.reviews) }
       return Effect.succeed(structuredClone(state.pr))
@@ -110,7 +110,9 @@ test("server rechecks allowlist, findings, current whole-PR range and protected 
     (f: ReturnType<typeof fixture>) => { f.state.pr.head.sha = "c".repeat(40) },
     (f: ReturnType<typeof fixture>) => { f.state.mergeBase = "c".repeat(40) },
     (f: ReturnType<typeof fixture>) => { f.state.pr.draft = true },
-    (f: ReturnType<typeof fixture>) => { f.state.config = "stamp:\n  enabled: false\n" },
+    (f: ReturnType<typeof fixture>) => { f.state.config = JSON.stringify({ stamp: { enabled: false, service } }) },
+    (f: ReturnType<typeof fixture>) => { f.state.config = "stamp:\n  enabled: true\n" },
+    (f: ReturnType<typeof fixture>) => { f.state.files[0]!.filename = ".review/knowledge.lock.json" },
     (f: ReturnType<typeof fixture>) => { f.state.files[0]!.previous_filename = ".agents/skills/review/SKILL.md" },
     (f: ReturnType<typeof fixture>) => { f.state.files[0]!.additions = 401 },
     (f: ReturnType<typeof fixture>) => { delete f.state.files[0]!.patch },

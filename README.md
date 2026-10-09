@@ -136,53 +136,56 @@ The CLI keeps `--context-file` optional for direct callers; the skill requires i
 
 ## Optional config
 
-A `review.yaml`, `review.yml`, or `review.json` at the reviewed repository root chooses which lenses apply to which paths and sets the severity and confidence floor:
+A `.review/config.json` in the reviewed repository chooses which lenses apply to which paths and sets the severity and confidence floor. Review configuration is JSON only:
 
-```yaml
-skills: [correctness, security]
-severity:
-  minimum: medium
-minimumConfidence: 0.7
-paths:
-  - pattern: "api/**"
-    skills: [security]
-rules:
-  - Do not report style-only issues.
-  - Prefer repository evidence over assumptions.
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas/config.schema.json",
+  "skills": ["correctness", "security"],
+  "minimumSeverity": "medium",
+  "minimumConfidence": 0.7,
+  "paths": [{ "pattern": "api/**", "skills": ["security"] }],
+  "rules": [
+    "Do not report style-only issues.",
+    "Prefer repository evidence over assumptions."
+  ]
+}
 ```
+
+The optional `$schema` key enables editor completion and validation from [`schemas/`](schemas/). The CLI's own decoder remains authoritative and rejects unknown keys.
 
 Patterns match repository-relative paths with forward slashes: `api/**` covers `api/v1/auth.ts`, while `*.ts` only covers files at the root. Matching path rules combine their lenses and are restricted by the global `skills` list. Unmatched paths use the global list. An empty lens list disables optional checks; organization-required lenses still apply. Defaults are correctness and security, minimum severity `medium`, and minimum confidence `0.7`.
 
-Configuration is read from the current working tree, including for commit reviews. If multiple config files exist, choose one with `--config review.yaml`. A relative config path resolves from the repository root; a findings input path resolves from the shell's current directory. Invalid config fails the command rather than silently using defaults. Free-text rules guide the coding agent's judgment.
+Configuration is read from the current working tree, including for commit reviews. `--config other.json` selects a different JSON file. A relative config path resolves from the repository root; a findings input path resolves from the shell's current directory. Invalid config fails the command rather than silently using defaults. Free-text rules guide the coding agent's judgment.
 
 ## Shared knowledge
 
-Keep repository knowledge with the code and organization knowledge in a dedicated Git repository. For example, a project can declare:
+Keep repository knowledge with the code and organization knowledge in a dedicated Git repository. For example, a project's `.review/config.json` can declare:
 
-```yaml
-organization:
-  source: https://github.com/your-org/engineering-knowledge.git
-  ref: main
-knowledge:
-  - docs/architecture.md
-  - docs/testing.md
+```json
+{
+  "organization": { "source": "https://github.com/your-org/engineering-knowledge.git", "ref": "main" },
+  "knowledge": ["docs/architecture.md", "docs/testing.md"]
+}
 ```
 
-The organization repository has its own `review.yaml` manifest:
+The organization repository has a `.review/organization.json` manifest:
 
-```yaml
-defaults:
-  skills: [correctness, security]
-  minimumConfidence: 0.8
-required:
-  skills: [security]
-  minimumSeverity: medium
-  minimumConfidence: 0.75
-  rules:
-    - Never expose credentials in logs.
-knowledge:
-  - knowledge/engineering.md
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas/organization.schema.json",
+  "defaults": { "skills": ["correctness", "security"], "minimumConfidence": 0.8 },
+  "required": {
+    "skills": ["security"],
+    "minimumSeverity": "medium",
+    "minimumConfidence": 0.75,
+    "rules": ["Never expose credentials in logs."]
+  },
+  "knowledge": ["knowledge/engineering.md"]
+}
 ```
+
+`defaults` and `required` use the same policy field names as the repository config. Because the manifest has its own filename, the organization repository can also keep a `.review/config.json` for reviews of its own changes.
 
 Repo settings override organization defaults field by field. Required lenses always apply, including to paths that narrow optional checks. Repo thresholds or global lens settings that weaken declared requirements are configuration errors. Required free-text rules are retained when repo rules replace defaults; the coding agent evaluates those rules.
 
@@ -197,7 +200,7 @@ review sync
 review sync --update
 ```
 
-Commit `review.yaml`, repo knowledge docs, and `.review/knowledge.lock.json` with the project. Initial sync creates the lock. Subsequent syncs restore that exact revision; `--update` resolves the configured ref again and changes the lock after validating the new policy. Failed updates preserve the previous lock. Setup can run from outside Git to install a user-wide skill; connecting organization knowledge requires a project. `--skip-skills` configures/syncs knowledge without installing the skill.
+Commit `.review/config.json`, `.review/knowledge.lock.json`, and repo knowledge docs with the project. Initial sync creates the lock. Subsequent syncs restore that exact revision; `--update` resolves the configured ref again and changes the lock after validating the new policy. Failed updates preserve the previous lock. Setup can run from outside Git to install a user-wide skill; connecting organization knowledge requires a project. `--skip-skills` configures/syncs knowledge without installing the skill.
 
 Knowledge is cached outside the project, in `$XDG_CACHE_HOME/review` or `~/.cache/review` on Unix and the local app-data directory on Windows; `REVIEW_CACHE_DIR` overrides it. Private repositories use Git's existing authentication. Review commands use the locked cache offline and report an actionable error if it is missing. Context includes both scopes' document contents and the organization revision; check reports identify that revision too.
 
@@ -212,6 +215,8 @@ npm test
 npm run build
 ```
 
+After changing the config schemas in `src/model.ts`, run `npm run schemas` to regenerate `schemas/*.schema.json`; a test fails while they are stale.
+
 The integration tests run the built executable against temporary repositories and isolated home directories. Publishing tests use a fake `gh` executable to verify API calls without posting live comments. `npm pack` builds an installable archive containing the CLI and skill.
 
 ## Stamp a PR
@@ -224,16 +229,17 @@ review stamp approve /tmp/findings.json --repo /path/to/project \
   --base <reviewed-merge-base> --head <reviewed-head>
 ```
 
-`review stamp approve` checks the original findings again, requires zero accepted findings, verifies the current whole-PR range, and reads stamping settings from the base branch. It then calls the shared stamp service directly. `--dry-run` validates and previews without calling that service.
+`review stamp approve` checks the original findings again, requires zero accepted findings, verifies the current whole-PR range, and reads stamping settings from the base branch's `.review/config.json`. It then calls the shared stamp service directly. `--dry-run` validates and previews without calling that service.
 
-```yaml
-stamp:
-  enabled: true
-  service: https://review.example.com/api/stamp
-  denyPaths:
-    - "infra/**"
-    - ".github/workflows/**"
-  maxChangedLines: 400
+```json
+{
+  "stamp": {
+    "enabled": true,
+    "service": "https://review.example.com/api/stamp",
+    "denyPaths": ["infra/**", ".github/workflows/**"],
+    "maxChangedLines": 400
+  }
+}
 ```
 
 Set the trusted endpoint as `REVIEW_STAMP_URL` and its approval key as `REVIEW_STAMP_KEY` through your normal local configuration. The CLI sends the key in a header and never includes it in its report. The base branch's `stamp.service` must match the locally trusted URL before any key is sent. Review policy settings and the authorized service URL belong on the base branch, so a PR cannot enable its own stamping.
@@ -242,11 +248,11 @@ The [stamp service](stamp-service/README.md) rewrites the shared reviewer pool a
 
 The service excludes the PR author, chooses another eligible account, submits an approval at the reviewed commit, and labels that approval **Review Agent — automated approval**. Developers need the existing review CLI and the approval key.
 
-The CLI and service refuse closed/draft PRs, stale or partial reviews, accepted findings, protected paths and changes over the size limit. Config files, the review skill and service code are protected by default. Binary or unavailable text patches require manual review. The service also enforces an administrator-configured repository allowlist and reserves each PR/head pair so concurrent requests cannot submit duplicate approvals. It tries another account only after an explicit GitHub refusal. An uncertain write leaves a pending reservation for inspection instead of retrying.
+The CLI and service refuse closed/draft PRs, stale or partial reviews, accepted findings, protected paths and changes over the size limit. Everything under `.review/` (config and organization lock), the review skill and service code are protected by default. Binary or unavailable text patches require manual review. The service also enforces an administrator-configured repository allowlist and reserves each PR/head pair so concurrent requests cannot submit duplicate approvals. It tries another account only after an explicit GitHub refusal. An uncertain write leaves a pending reservation for inspection instead of retrying.
 
 GitHub still displays the opted-in account as the reviewer. The approval body identifies the automated review and its commits. Whether that approval satisfies branch requirements depends on the account's permissions and repository rules. Enable dismissal of stale approvals in the repository's branch rules.
 
-The previous Teams scripts are replaced by this CLI command. Old `stamp.team` and `stamp.channel` fields remain parseable for existing configs, but stamping now requires `stamp.service`. Mechanical validation cannot prove the AI's defect assessment; the approval still depends on the completed review.
+Mechanical validation cannot prove the AI's defect assessment; the approval still depends on the completed review.
 
 Service tests are part of `npm test`, and can also be run with:
 

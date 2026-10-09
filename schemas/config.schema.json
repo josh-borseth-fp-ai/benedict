@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas/config.schema.json",
+  "title": "Review repository config (.review/config.json)",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "correctness",
+          "security"
+        ]
+      }
+    },
+    "minimumSeverity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "minimumConfidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "correctness",
+                "security"
+              ]
+            }
+          }
+        },
+        "required": [
+          "pattern",
+          "skills"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "knowledge": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "organization": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "stamp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "service": {
+          "type": "string"
+        },
+        "denyPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxChangedLines": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

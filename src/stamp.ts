@@ -5,14 +5,12 @@ import { checkFindings, readFindings } from "./check.js"
 import { collectSnapshot } from "./context.js"
 import { Git } from "./git.js"
 import { GitHub } from "./github.js"
-import { ConfigFile, ReviewError } from "./model.js"
-import { parseConfig } from "./policy.js"
+import { ConfigFile, ReviewError, configPath } from "./model.js"
+import { parseJson } from "./policy.js"
 import { parsePullRequest } from "./publish.js"
-import { serviceUrl } from "./stamp-protocol.js"
+import { protectedPaths, serviceUrl } from "./stamp-protocol.js"
 export { serviceUrl } from "./stamp-protocol.js"
 
-const configNames = ["review.yaml", "review.yml", "review.json"]
-const protectedPaths = [...configNames, ".agents/skills/review/**", "stamp-service/**", "src/stamp*.ts"]
 const Sha = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))
 const Pr = Schema.Struct({
   state: Schema.String, draft: Schema.Boolean,
@@ -56,10 +54,9 @@ export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOpt
     return yield* fail("stale_review", "Stamping requires a review of the current whole PR, from its merge base through its head.")
   }
   // Read stamping authorization and destination from GitHub's base commit, never from the PR or worktree.
-  const configPaths = (yield* git.run(root, ["ls-tree", "--name-only", pr.base.sha, "--", ...configNames])).trim().split("\n").filter(Boolean)
-  if (configPaths.length !== 1) return yield* fail("stamp_refused", "The base branch must have exactly one review config with stamping enabled.")
-  const configPath = configPaths[0]!
-  const parsed = yield* parseConfig(yield* git.run(root, ["show", `${pr.base.sha}:${configPath}`]), configPath)
+  const entry = yield* git.run(root, ["ls-tree", pr.base.sha, "--", configPath])
+  if (!/^100(644|755) blob /.test(entry)) return yield* fail("stamp_refused", `The base branch must have ${configPath} with stamping enabled.`)
+  const parsed = yield* parseJson(yield* git.run(root, ["show", `${pr.base.sha}:${configPath}`]), configPath)
   const config = yield* Schema.decodeUnknownEffect(ConfigFile, { onExcessProperty: "error" })(parsed).pipe(
     Effect.mapError(() => fail("config_error", "The base branch review config is invalid."))
   )

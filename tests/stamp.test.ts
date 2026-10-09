@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
@@ -11,7 +11,7 @@ import { serviceUrl } from "../src/stamp.js"
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url))
 const pr = "https://github.com/acme/project/pull/7"
 
-const fixture = (t: TestContext, config = "") => {
+const fixture = (t: TestContext, stamp: Record<string, unknown> = {}, headFiles: Record<string, string> = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "review-direct-stamp-"))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim()
@@ -19,12 +19,14 @@ const fixture = (t: TestContext, config = "") => {
   git("config", "user.name", "Test")
   git("config", "user.email", "test@example.invalid")
   git("config", "commit.gpgsign", "false")
-  writeFileSync(join(dir, "review.yaml"), `stamp:\n  enabled: true\n  service: https://stamp.example.invalid/api/stamp\n${config}`)
+  mkdirSync(join(dir, ".review"))
+  writeFileSync(join(dir, ".review/config.json"), JSON.stringify({ stamp: { enabled: true, service: "https://stamp.example.invalid/api/stamp", ...stamp } }))
   writeFileSync(join(dir, "safe.ts"), "export const value = 1\n")
   git("add", ".")
   git("commit", "--quiet", "-m", "base")
   const base = git("rev-parse", "HEAD")
   writeFileSync(join(dir, "safe.ts"), "export const value = 2\n")
+  for (const [file, content] of Object.entries(headFiles)) writeFileSync(join(dir, file), content)
   git("add", ".")
   git("commit", "--quiet", "-m", "head")
   const head = git("rev-parse", "HEAD")
@@ -80,13 +82,17 @@ test("stamp calls the base-authorized service with the reviewed head and keeps a
 })
 
 test("stamp refuses findings, protected paths and excessive changes before sending", t => {
-  for (const config of ['  denyPaths: ["safe.ts"]\n', "  maxChangedLines: 1\n"]) {
-    const f = fixture(t, config)
+  for (const stamp of [{ denyPaths: ["safe.ts"] }, { maxChangedLines: 1 }]) {
+    const f = fixture(t, stamp)
     const result = f.run()
     assert.equal(result.status, 2)
     assert.equal(JSON.parse(result.stderr).error.code, "stamp_refused")
     assert.ok(f.calls().every(call => call.gh))
   }
+  const locked = fixture(t, {}, { ".review/knowledge.lock.json": "{}\n" })
+  const refused = locked.run()
+  assert.equal(refused.status, 2)
+  assert.match(JSON.parse(refused.stderr).error.message, /protected by \.review\/\*\*/)
   const f = fixture(t)
   writeFileSync(f.findings, JSON.stringify([{ file: "safe.ts", startLine: 1, endLine: 1, severity: "high", skill: "correctness", title: "Actual issue", explanation: "A verified defect", quote: "export const value = 2", confidence: 0.9 }]))
   const result = f.run()
