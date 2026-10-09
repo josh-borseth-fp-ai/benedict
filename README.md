@@ -2,7 +2,7 @@
 
 Benedict is a code review skill and an Effect TypeScript CLI for coding agents. The skill guides the investigation of correctness and security defects. The CLI gathers Git context, validates findings against source evidence and repository policy, and publishes AI-labeled reviews to GitHub.
 
-Benedict is a cat, named for Benny. At home he's Benny; on your pull requests he goes by his full, formal name. *Benedict* comes from the Latin *bene dicere*, "to speak well of," and is the root of *benediction*, a blessing. That is the job: Benedict reads the change, reports only defects he can quote from the source, and when a PR comes back clean, he gives it his blessing with a GitHub approval.
+Benedict is a cat who reviews code. He reads the change, reports only defects he can quote from the source, and when a PR comes back clean, he approves it on GitHub.
 
 ## Install
 
