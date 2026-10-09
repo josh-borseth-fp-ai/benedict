@@ -110,7 +110,7 @@ const setupCommand = Command.make("setup", {
     organization: Option.getOrUndefined(flags.organization), ref: Option.getOrUndefined(flags.ref),
     project: flags.project, agents: flags.agent, yes: flags.yes, skipSkills: flags.skipSkills
   })
-  yield* Console.log(`${result.skillInstalled ? `Installed the review skill (${result.scope} scope).` : "Skill installation skipped."}\n${result.organization ? `Organization revision: ${result.organization.revision}\nReview and commit ${configPath} and ${lockPath}.` : "No organization configured; repository rules still apply."}\nAsk your coding agent to use the review skill to review your change.`)
+  yield* Console.log(`${result.skillInstalled ? `Installed the Benedict skill (${result.scope} scope).` : "Skill installation skipped."}\n${result.organization ? `Organization revision: ${result.organization.revision}\nReview and commit ${configPath} and ${lockPath}.` : "No organization configured; repository rules still apply."}\nAsk your coding agent to use the benedict skill to review your change.`)
 })).pipe(Command.withDescription("Install the bundled skill and connect this repository to organization knowledge."))
 
 const publishCommand = Command.make("publish", {
@@ -155,7 +155,7 @@ const stampApproveCommand = Command.make("approve", {
   })
   yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) :
     `${result.action}: ${result.reviewUrl ?? result.pr}\nReviewed head: ${result.head}`)
-})).pipe(Command.withDescription("Approve a clean, published whole-PR review through the Review Agent GitHub App service."))
+})).pipe(Command.withDescription("Approve a clean, published whole-PR review through the Benedict GitHub App service."))
 
 const stampServeCommand = Command.make("serve", {
   host: Flag.String("host").pipe(Flag.withDefault("127.0.0.1")),
@@ -163,18 +163,18 @@ const stampServeCommand = Command.make("serve", {
 }, Effect.fn(function*(flags) {
   if (flags.port < 1 || flags.port > 65535) return yield* Effect.fail(new Error("--port must be between 1 and 65535."))
   yield* serveStamp(flags.host, flags.port)
-})).pipe(Command.withDescription("Run the stateless HTTP approval service for the Review Agent GitHub App."))
+})).pipe(Command.withDescription("Run the stateless HTTP approval service for the Benedict GitHub App."))
 const stampCommand = Command.make("stamp").pipe(
-  Command.withDescription("Approve reviewed PRs through the Review Agent GitHub App."),
+  Command.withDescription("Approve reviewed PRs through the Benedict GitHub App."),
   Command.withSubcommands([stampApproveCommand, stampServeCommand])
 )
 
-export const reviewCommand = Command.make("review").pipe(
-  Command.withDescription("Deterministic review tools for coding agents."),
+export const benedictCommand = Command.make("benedict").pipe(
+  Command.withDescription("Benedict: deterministic code review tools for coding agents."),
   Command.withSubcommands([contextCommand, checkCommand, publishCommand, stampCommand, syncCommand, setupCommand])
 )
 
-export const run = Command.run(reviewCommand, { version: "0.1.0" }).pipe(
+export const run = Command.run(benedictCommand, { version: "0.1.0" }).pipe(
   Effect.provide(Git.layer),
   Effect.provide(GitHub.layer),
   Effect.provide(NodeServices.layer),

@@ -6,4 +6,4 @@ node_modules/
 dist/
 *.tgz
 
-.agents/skills/review/node_modules/
+.agents/skills/benedict/node_modules/

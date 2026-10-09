@@ -35,9 +35,9 @@ export const resolveOrganization = Effect.fn("Knowledge.resolveSource")(function
 export const cacheDirectory = Effect.fn("Knowledge.cacheDirectory")(function*(root: string, source: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const base = process.env.REVIEW_CACHE_DIR ?? path.join(
+  const base = process.env.BENEDICT_CACHE_DIR ?? path.join(
     process.env.XDG_CACHE_HOME ?? (process.platform === "win32" ? process.env.LOCALAPPDATA ?? path.join(homedir(), "AppData", "Local") : path.join(homedir(), ".cache")),
-    "review"
+    "benedict"
   )
   const cache = path.resolve(base)
   let ancestor = cache
@@ -71,14 +71,14 @@ export const readLock = Effect.fn("Knowledge.readLock")(function*(root: string) 
   return yield* Schema.decodeUnknownEffect(KnowledgeLock, { onExcessProperty: "error" })(parsed).pipe(Effect.mapError(knowledgeFailure))
 })
 
-/** Creates `.review/` for CLI-owned state and refuses a symlinked directory. */
+/** Creates `.benedict/` for CLI-owned state and refuses a symlinked directory. */
 export const reviewDirectory = Effect.fn("Knowledge.reviewDirectory")(function*(root: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = path.join(root, path.dirname(lockPath))
   yield* fs.makeDirectory(directory, { recursive: true })
   if ((yield* fs.realPath(directory)) !== path.join(yield* fs.realPath(root), path.dirname(lockPath))) {
-    return yield* new ReviewError({ code: "knowledge_error", message: "The .review directory cannot be a symlink." })
+    return yield* new ReviewError({ code: "knowledge_error", message: "The .benedict directory cannot be a symlink." })
   }
   return directory
 })
@@ -88,7 +88,7 @@ export const writeAtomically = Effect.fn("Knowledge.writeAtomically")(function*(
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   yield* Effect.scoped(Effect.gen(function*() {
-    const temporary = yield* fs.makeTempDirectoryScoped({ directory: path.dirname(target), prefix: ".review-write-" })
+    const temporary = yield* fs.makeTempDirectoryScoped({ directory: path.dirname(target), prefix: ".benedict-write-" })
     const file = path.join(temporary, path.basename(target))
     yield* fs.writeFileString(file, text)
     yield* fs.rename(file, target)
@@ -135,7 +135,7 @@ export const readOrganizationBundle = Effect.fn("Knowledge.readOrganization")(fu
   })
   // Reading an exact commit works offline and never checks out organization code.
   yield* git.run(cache, ["cat-file", "-e", `${lock.revision}^{commit}`]).pipe(Effect.mapError(() => new ReviewError({
-    code: "knowledge_unavailable", message: "The locked organization revision is unavailable. Run review sync to populate the cache."
+    code: "knowledge_unavailable", message: "The locked organization revision is unavailable. Run benedict sync to populate the cache."
   })))
   const text = yield* readBlob(organizationManifestPath, false)
   if (text === null) {
@@ -157,11 +157,11 @@ export const loadOrganization = Effect.fn("Knowledge.loadLocked")(function*(root
   const resolved = yield* resolveOrganization(root, organization)
   const lock = yield* readLock(root)
   if (!lock || lock.source !== resolved.source || lock.ref !== resolved.ref) {
-    return yield* new ReviewError({ code: "knowledge_unavailable", message: `Organization knowledge has no matching lock. Run review sync (or review sync --update after changing the source/ref), then commit ${lockPath}.` })
+    return yield* new ReviewError({ code: "knowledge_unavailable", message: `Organization knowledge has no matching lock. Run benedict sync (or benedict sync --update after changing the source/ref), then commit ${lockPath}.` })
   }
   const cache = yield* cacheDirectory(root, lock.source)
   if (!(yield* fs.exists(cache))) {
-    return yield* new ReviewError({ code: "knowledge_unavailable", message: "Organization knowledge is not cached. Run review sync before reviewing." })
+    return yield* new ReviewError({ code: "knowledge_unavailable", message: "Organization knowledge is not cached. Run benedict sync before reviewing." })
   }
   return yield* readOrganizationBundle(cache, lock)
 })

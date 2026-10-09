@@ -30,7 +30,7 @@ export const readServerConfig = (env: NodeJS.ProcessEnv) => Effect.try({
 
 const authorized = (key: Redacted.Redacted<string>) => Effect.gen(function*() {
   const request = yield* HttpServerRequest.HttpServerRequest
-  const input = Buffer.from(request.headers["x-review-key"] ?? "")
+  const input = Buffer.from(request.headers["x-benedict-key"] ?? "")
   const expected = Buffer.from(Redacted.value(key))
   if (input.length !== expected.length || !timingSafeEqual(input, expected)) return yield* stampError("unauthorized", "The key is not authorized for this operation.", 401)
 })

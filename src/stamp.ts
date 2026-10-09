@@ -92,7 +92,7 @@ export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOpt
     published.push(...comments.filter(comment => comment.user.id === user.id && comment.body?.startsWith(`${commentMarker}\n`)))
     if (comments.length < 100) break
   }
-  if (published.length !== 1) return yield* fail("publish_required", "Publish exactly one review comment for this PR with review publish before stamping.")
+  if (published.length !== 1) return yield* fail("publish_required", "Publish exactly one review comment for this PR with benedict publish before stamping.")
   const recorded = publishedConfidence(published[0]!.body ?? "", mergeBase, pr.head.sha)
   if (recorded === undefined) return yield* fail("publish_required", "The published review must cover this whole-PR range, have zero accepted findings, and state one **Confidence: N/5** score. Publish the current review before stamping.")
   if (recorded !== options.confidence) return yield* fail("stamp_refused", `--confidence ${options.confidence} does not match the published review's ${recorded}/5.`)
@@ -104,12 +104,12 @@ export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOpt
   }
   if (options.dryRun) return { action: "dry-run" as const, pr: target.url, head: pr.head.sha, service, request, reviewUrl: null }
   // A repository can authorize stamping, but cannot choose the destination for a locally configured secret.
-  const trustedService = process.env.REVIEW_STAMP_URL
-  if (!trustedService) return yield* fail("stamp_auth", "Set REVIEW_STAMP_URL to the trusted stamp endpoint for your service key.")
-  const trustedUrl = yield* Effect.try({ try: () => serviceUrl(trustedService), catch: () => fail("stamp_auth", "REVIEW_STAMP_URL must be a valid HTTPS stamp endpoint.") })
-  if (trustedUrl !== service) return yield* fail("stamp_auth", "The base branch stamp.service does not match the locally trusted REVIEW_STAMP_URL. No key was sent.")
-  const key = process.env.REVIEW_STAMP_KEY
-  if (!key?.trim()) return yield* fail("stamp_auth", "Set REVIEW_STAMP_KEY to the shared service's stamp key.")
+  const trustedService = process.env.BENEDICT_STAMP_URL
+  if (!trustedService) return yield* fail("stamp_auth", "Set BENEDICT_STAMP_URL to the trusted stamp endpoint for your service key.")
+  const trustedUrl = yield* Effect.try({ try: () => serviceUrl(trustedService), catch: () => fail("stamp_auth", "BENEDICT_STAMP_URL must be a valid HTTPS stamp endpoint.") })
+  if (trustedUrl !== service) return yield* fail("stamp_auth", "The base branch stamp.service does not match the locally trusted BENEDICT_STAMP_URL. No key was sent.")
+  const key = process.env.BENEDICT_STAMP_KEY
+  if (!key?.trim()) return yield* fail("stamp_auth", "Set BENEDICT_STAMP_KEY to the shared service's stamp key.")
   const current = yield* readPr()
   if (current.state !== pr.state || current.draft || current.head.sha !== pr.head.sha || current.base.sha !== pr.base.sha) {
     return yield* fail("stale_review", "The PR changed before stamping. Review its current range.")
@@ -117,7 +117,7 @@ export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOpt
   const result = yield* Effect.gen(function*() {
     const http = yield* HttpClient.HttpClient
     const response = yield* http.execute(HttpClientRequest.post(service).pipe(
-      HttpClientRequest.setHeader("x-review-key", key), HttpClientRequest.bodyJsonUnsafe(request)
+      HttpClientRequest.setHeader("x-benedict-key", key), HttpClientRequest.bodyJsonUnsafe(request)
     ))
     if (response.status >= 200 && response.status < 300) return yield* response.json
     // A refusal is definite; report the service's reason instead of the generic uncertain-outcome error.

@@ -2,10 +2,10 @@ import { Context, Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ReviewError } from "./model.js"
 
-/** GitHub authentication stays with gh; the review tool never reads credentials. */
+/** GitHub authentication stays with gh; Benedict never reads credentials. */
 export class GitHub extends Context.Service<GitHub, {
   readonly request: (method: "GET" | "POST" | "PATCH", endpoint: string, body?: unknown) => Effect.Effect<unknown, ReviewError>
-}>()("review/GitHub") {
+}>()("benedict/GitHub") {
   static readonly layer = Layer.effect(GitHub, Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const request = Effect.fn("GitHub.request")(function*(method: "GET" | "POST" | "PATCH", endpoint: string, body?: unknown) {

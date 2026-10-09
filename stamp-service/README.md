@@ -1,10 +1,10 @@
-# Review Agent approval service
+# Benedict approval service
 
-The approval service is part of the Effect TypeScript review CLI (`src/stamp*.ts`). It submits PR approvals as one organization-owned GitHub App after a developer's local review agent has reviewed and published a clean whole-PR review. It is stateless: no database, user tokens, reviewer pool or frontend.
+The approval service is part of the Benedict CLI (`src/stamp*.ts`). It submits PR approvals as one organization-owned GitHub App after a developer's local review agent has reviewed and published a clean whole-PR review. It is stateless: no database, user tokens, reviewer pool or frontend.
 
 ## GitHub App
 
-Create a GitHub App owned by the organization, for example **Review Agent**:
+Create a GitHub App owned by the organization, for example **Benedict**:
 
 - Repository permissions: **Pull requests: read and write**, **Contents: read**, and **Metadata: read**.
 - Webhook: disabled. No callback URL, device flow or user authorization is needed.
@@ -16,11 +16,11 @@ Approvals appear as `<app-slug>[bot]`. Branch protection and rulesets decide whe
 
 ## Deployment
 
-Build and install the review CLI with Node.js 22.20 or newer. Provide these settings through the host's environment or secret manager:
+Build and install the Benedict CLI with Node.js 22.20 or newer. Provide these settings through the host's environment or secret manager:
 
 | Setting | Purpose |
 | --- | --- |
-| `STAMP_PUBLIC_URL` | Full externally reachable HTTPS endpoint, e.g. `https://review.example.com/api/stamp` |
+| `STAMP_PUBLIC_URL` | Full externally reachable HTTPS endpoint, e.g. `https://benedict.example.com/api/stamp` |
 | `STAMP_KEY` | Shared approval key; at least 32 random characters |
 | `GITHUB_APP_ID` | Numeric GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | The app's PEM private key; escaped `\n` newlines are accepted |
@@ -28,7 +28,7 @@ Build and install the review CLI with Node.js 22.20 or newer. Provide these sett
 Start the service behind a reverse proxy that provides HTTPS:
 
 ```sh
-review stamp serve --host 127.0.0.1 --port 8080
+benedict stamp serve --host 127.0.0.1 --port 8080
 ```
 
 From a checkout, run `npm ci`, `npm run build`, then `node dist/main.js stamp serve`. The Node listener uses HTTP; the public endpoint must use HTTPS. Forward `/api/*` to the listener. `GET /api/health` reports health without authentication. The service needs outbound access to `api.github.com`.
@@ -40,17 +40,17 @@ Anyone holding the private key can approve PRs on every installed repository. Ke
 Distribute the endpoint and approval key through normal secret configuration:
 
 ```sh
-export REVIEW_STAMP_URL=https://review.example.com/api/stamp
-# Configure REVIEW_STAMP_KEY through your normal secret configuration.
+export BENEDICT_STAMP_URL=https://benedict.example.com/api/stamp
+# Configure BENEDICT_STAMP_KEY through your normal secret configuration.
 ```
 
-Each repository authorizes the same endpoint in `.review/config.json` on its base branch:
+Each repository authorizes the same endpoint in `.benedict/config.json` on its base branch:
 
 ```json
 {
   "stamp": {
     "enabled": true,
-    "service": "https://review.example.com/api/stamp",
+    "service": "https://benedict.example.com/api/stamp",
     "denyPaths": ["infra/**", ".github/workflows/**"],
     "maxChangedLines": 400
   }
@@ -64,12 +64,12 @@ Any key holder can request a stamp, including for their own PR. Rotate `STAMP_KE
 After a clean whole-PR review is published:
 
 ```sh
-review stamp approve /tmp/findings.json --repo /path/to/repository \
+benedict stamp approve /tmp/findings.json --repo /path/to/repository \
   --pr https://github.com/ORG/REPO/pull/123 \
   --base <reviewed-merge-base> --head <reviewed-head> --confidence 4
 ```
 
-For each request, the service checks the `x-review-key` header. It signs a short-lived app JWT and creates an installation token limited to that repository, with pull-request write and contents read permissions. It then requires:
+For each request, the service checks the `x-benedict-key` header. It signs a short-lived app JWT and creates an installation token limited to that repository, with pull-request write and contents read permissions. It then requires:
 
 - zero accepted findings and an overall confidence of at least 4/5;
 - an open, non-draft PR whose current head and merge base match the review;

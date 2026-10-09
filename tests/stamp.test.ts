@@ -13,15 +13,15 @@ const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url))
 const pr = "https://github.com/acme/project/pull/7"
 
 const fixture = (t: TestContext, stamp: Record<string, unknown> = {}, headFiles: Record<string, string> = {}) => {
-  const dir = mkdtempSync(join(tmpdir(), "review-direct-stamp-"))
+  const dir = mkdtempSync(join(tmpdir(), "benedict-direct-stamp-"))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim()
   git("init", "--quiet")
   git("config", "user.name", "Test")
   git("config", "user.email", "test@example.invalid")
   git("config", "commit.gpgsign", "false")
-  mkdirSync(join(dir, ".review"))
-  writeFileSync(join(dir, ".review/config.json"), JSON.stringify({ stamp: { enabled: true, service: "https://stamp.example.invalid/api/stamp", ...stamp } }))
+  mkdirSync(join(dir, ".benedict"))
+  writeFileSync(join(dir, ".benedict/config.json"), JSON.stringify({ stamp: { enabled: true, service: "https://stamp.example.invalid/api/stamp", ...stamp } }))
   writeFileSync(join(dir, "safe.ts"), "export const value = 1\n")
   git("add", ".")
   git("commit", "--quiet", "-m", "base")
@@ -58,14 +58,14 @@ const fixture = (t: TestContext, stamp: Record<string, unknown> = {}, headFiles:
     "--import", hook, cli, "stamp", "approve", findings, "--pr", pr,
     ...(args.includes("--base") ? [] : ["--base", base]), "--head", head,
     ...(args.includes("--confidence") ? [] : ["--confidence", "4"]), ...args
-  ], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, REVIEW_STAMP_KEY: "test-key", REVIEW_STAMP_URL: "https://stamp.example.invalid/api/stamp", ...env } })
+  ], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, BENEDICT_STAMP_KEY: "test-key", BENEDICT_STAMP_URL: "https://stamp.example.invalid/api/stamp", ...env } })
   const calls = () => readFileSync(log, "utf8").trim().split("\n").map(line => JSON.parse(line)) as Array<{ gh?: string[]; url?: string; headers?: Record<string, string>; body?: { version: number; head: string; base: string; findings: unknown[]; confidence: number; reviewComment: string }; redirect?: string }>
   return { dir, base, head, state, findings, comments, reviewComment, run, calls, git }
 }
 
 test("stamp dry-run validates whole-PR range without sending an approval request", t => {
   const f = fixture(t)
-  const result = f.run(["--dry-run"], { REVIEW_STAMP_KEY: "" })
+  const result = f.run(["--dry-run"], { BENEDICT_STAMP_KEY: "" })
   assert.equal(result.status, 0, result.stderr)
   const preview = JSON.parse(result.stdout)
   assert.equal(preview.action, "dry-run")
@@ -87,7 +87,7 @@ test("stamp calls the base-authorized service with the reviewed head and keeps a
   assert.equal(requests[0]?.body?.version, 2)
   assert.equal(requests[0]?.body?.confidence, 4)
   assert.equal(requests[0]?.body?.reviewComment, `${pr}#issuecomment-55`)
-  assert.equal(requests[0]?.headers?.["x-review-key"], "test-key")
+  assert.equal(requests[0]?.headers?.["x-benedict-key"], "test-key")
   assert.equal(requests[0]?.redirect, "error")
   assert.ok(!result.stdout.includes("test-key"))
   assert.ok(!result.stderr.includes("test-key"))
@@ -101,10 +101,10 @@ test("stamp refuses findings, protected paths and excessive changes before sendi
     assert.equal(JSON.parse(result.stderr).error.code, "stamp_refused")
     assert.ok(f.calls().every(call => call.gh))
   }
-  const locked = fixture(t, {}, { ".review/knowledge.lock.json": "{}\n" })
+  const locked = fixture(t, {}, { ".benedict/knowledge.lock.json": "{}\n" })
   const refused = locked.run()
   assert.equal(refused.status, 2)
-  assert.match(JSON.parse(refused.stderr).error.message, /protected by \.review\/\*\*/)
+  assert.match(JSON.parse(refused.stderr).error.message, /protected by \.benedict\/\*\*/)
   const f = fixture(t)
   writeFileSync(f.findings, JSON.stringify([{ file: "safe.ts", startLine: 1, endLine: 1, severity: "high", skill: "correctness", title: "Actual issue", explanation: "A verified defect", quote: "export const value = 2", confidence: 0.9 }]))
   const result = f.run()
@@ -118,7 +118,7 @@ test("stamp refuses stale heads, partial ranges, missing auth and uncertain writ
   assert.match(f.run().stderr, /current whole PR/)
   writeFileSync(f.state, JSON.stringify({ state: "open", draft: false, head: { sha: f.head }, base: { sha: f.base } }))
   assert.match(f.run(["--base", f.head]).stderr, /current whole PR/)
-  assert.match(f.run([], { REVIEW_STAMP_KEY: "" }).stderr, /REVIEW_STAMP_KEY/)
+  assert.match(f.run([], { BENEDICT_STAMP_KEY: "" }).stderr, /BENEDICT_STAMP_KEY/)
   const uncertain = f.run([], { STAMP_TEST_FAILURE: "1" })
   assert.equal(uncertain.status, 2)
   assert.match(uncertain.stderr, /may have reached GitHub/)
@@ -133,7 +133,7 @@ test("service URLs cannot carry credentials or redirect authentication to HTTP",
 
 test("repository config cannot send the local service key to an untrusted endpoint", t => {
   const f = fixture(t)
-  const result = f.run([], { REVIEW_STAMP_URL: "https://trusted.example.invalid/api/stamp" })
+  const result = f.run([], { BENEDICT_STAMP_URL: "https://trusted.example.invalid/api/stamp" })
   assert.equal(result.status, 2)
   assert.match(result.stderr, /does not match the locally trusted/)
   assert.ok(f.calls().every(call => call.gh))

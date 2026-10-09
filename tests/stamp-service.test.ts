@@ -13,7 +13,7 @@ import { readServerConfig, stampRoutes } from "../src/stamp-server.js"
 const base = "a".repeat(40), head = "b".repeat(40)
 const prUrl = "https://github.com/acme/project/pull/7"
 const service = "https://stamp.example.invalid/api/stamp"
-const bot = "review-agent[bot]"
+const bot = "benedict[bot]"
 const reviewBody = (confidence = "**Confidence: 4/5**", range = `\`${base}\` → \`${head}\``, accepted = 0) =>
   `${commentMarker}\n## AI-generated review\n\nReviewed commits: ${range}.\n\nAccepted findings: **${accepted}**. Dropped drafts: **2**.\n\n### Review context\n\n${confidence}\n\nVerified the changed path.\n`
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 })
@@ -47,7 +47,7 @@ const fixture = () => {
         return state.unknownWrite ? Effect.fail(stampError("write_uncertain", "Lost response.", 502)) : Effect.succeed(review)
       }
       if (endpoint.includes("/compare/")) return Effect.succeed({ merge_base_commit: { sha: state.mergeBase } })
-      if (endpoint.includes("/contents/")) return endpoint.includes("/contents/.review/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(stampError("github_not_found", "Not found.", 404))
+      if (endpoint.includes("/contents/")) return endpoint.includes("/contents/.benedict/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(stampError("github_not_found", "Not found.", 404))
       if (endpoint.includes("/files?")) return Effect.succeed(state.files)
       if (endpoint.includes("/issues/comments/55")) return state.comment ? Effect.succeed(state.comment) : Effect.fail(stampError("github_not_found", "Not found.", 404))
       if (endpoint.includes("/reviews?")) { if (state.mutateAfterReviews) state.pr.head.sha = "c".repeat(40); return Effect.succeed(state.reviews) }
@@ -69,7 +69,7 @@ test("the GitHub App approves the reviewed commit with AI attribution and is ide
   assert.equal(write.endpoint, "repos/acme/project/pulls/7/reviews")
   assert.equal(write.body.event, "APPROVE")
   assert.equal(write.body.commit_id, head)
-  assert.match(write.body.body, /Review Agent — automated approval/)
+  assert.match(write.body.body, /Benedict — automated approval/)
   assert.match(write.body.body, /overall confidence: 4\/5/)
   assert.ok(write.body.body.includes(`${prUrl}#issuecomment-55`))
   assert.equal((await f.approve()).action, "already-approved")
@@ -85,7 +85,7 @@ test("rerunning after an uncertain write finds the approval instead of writing a
   assert.equal(f.state.writes.length, 1)
 })
 
-test("another account's approval does not count as the Review Agent stamp", async () => {
+test("another account's approval does not count as the Benedict stamp", async () => {
   const f = fixture()
   f.state.reviews.push({ state: "APPROVED", commit_id: head, html_url: prUrl + "#pullrequestreview-1", user: { id: 2, login: "person" } })
   assert.equal((await f.approve()).action, "approved")
@@ -100,7 +100,7 @@ test("an explicit GitHub refusal is reported as a refusal", async () => {
   assert.equal(error.status, 409)
 })
 
-test("a dismissed Review Agent approval is not silently reapproved", async () => {
+test("a dismissed Benedict approval is not silently reapproved", async () => {
   const f = fixture()
   await f.approve()
   f.state.reviews[0]!.state = "DISMISSED"
@@ -119,8 +119,8 @@ test("the service rechecks findings, confidence, installation, whole-PR range, p
     ["stamp_refused", f => { f.state.config = JSON.stringify({ stamp: { enabled: false, service } }) }],
     ["stamp_refused", f => { f.state.config = JSON.stringify({ stamp: { enabled: true, service: "https://other.example.invalid/api/stamp" } }) }],
     ["config_error", f => { f.state.config = `stamp:\n  enabled: true\n  service: ${service}\n` }],
-    ["protected_path", f => { f.state.files[0]!.previous_filename = ".agents/skills/review/SKILL.md" }],
-    ["protected_path", f => { f.state.files[0]!.filename = ".review/knowledge.lock.json" }],
+    ["protected_path", f => { f.state.files[0]!.previous_filename = ".agents/skills/benedict/SKILL.md" }],
+    ["protected_path", f => { f.state.files[0]!.filename = ".benedict/knowledge.lock.json" }],
     ["size_limit", f => { f.state.files[0]!.additions = 401 }],
     ["coverage", f => { delete f.state.files[0]!.patch }],
     ["review_missing", f => { f.state.comment = undefined }],
@@ -155,7 +155,7 @@ test("the approval route requires the stamp key and exposes no other operations"
   const app = Layer.mergeAll(stampRoutes({ service, stampKey: Redacted.make("stamp-key") }), Layer.succeed(StampGitHub)(f.gh))
   const { handler, dispose } = HttpRouter.toWebHandler(app, { disableLogger: true })
   t.after(dispose)
-  const call = (path: string, key: string, body?: unknown) => handler(new Request("https://stamp.example.invalid" + path, { method: body ? "POST" : "GET", headers: { "x-review-key": key, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }))
+  const call = (path: string, key: string, body?: unknown) => handler(new Request("https://stamp.example.invalid" + path, { method: body ? "POST" : "GET", headers: { "x-benedict-key": key, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }))
   assert.equal((await call("/api/health", "")).status, 200)
   assert.equal((await call("/api/stamp", "wrong-key", f.report)).status, 401)
   for (const path of ["/api/enroll/start", "/api/users"]) assert.equal((await call(path, "stamp-key", {})).status, 404)
@@ -175,7 +175,7 @@ test("service configuration requires HTTPS, a strong key, a numeric app ID and a
   // Secret managers commonly store PEM newlines escaped.
   await Effect.runPromise(readServerConfig({ ...env, GITHUB_APP_PRIVATE_KEY: pem.replace(/\n/g, "\\n") }))
   const ec = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString()
-  for (const changed of [{ STAMP_PUBLIC_URL: "http://example.com/api/stamp" }, { STAMP_KEY: "weak" }, { GITHUB_APP_ID: "review-agent" }, { GITHUB_APP_PRIVATE_KEY: "not a key" }, { GITHUB_APP_PRIVATE_KEY: ec }, { GITHUB_APP_ID: "" }]) {
+  for (const changed of [{ STAMP_PUBLIC_URL: "http://example.com/api/stamp" }, { STAMP_KEY: "weak" }, { GITHUB_APP_ID: "benedict" }, { GITHUB_APP_PRIVATE_KEY: "not a key" }, { GITHUB_APP_PRIVATE_KEY: ec }, { GITHUB_APP_ID: "" }]) {
     const error = await Effect.runPromise(readServerConfig({ ...env, ...changed }).pipe(Effect.flip))
     assert.equal(error.code, "service_config")
   }
@@ -190,7 +190,7 @@ test("app JWTs are RS256-signed by the app with a bounded lifetime", () => {
 
 test("installation tokens are scoped to the stamped repository, and write outcomes are classified", async () => {
   const calls: Array<{ url: string; method: string; authorization: string | null; body: unknown }> = []
-  let respond = (url: string): Response => url.endsWith("/installation") ? Response.json({ id: 9, app_slug: "review-agent" }) : Response.json({ token: "scoped-token" })
+  let respond = (url: string): Response => url.endsWith("/installation") ? Response.json({ id: 9, app_slug: "benedict" }) : Response.json({ token: "scoped-token" })
   const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
     const text = await request.text()
@@ -202,7 +202,7 @@ test("installation tokens are scoped to the stamped repository, and write outcom
     Effect.provideService(FetchHttpClient.Fetch, fakeFetch)
   ))
   const installation = await run(gh => gh.installation("acme/project"))
-  assert.deepEqual(installation, { token: "scoped-token", login: "review-agent[bot]" })
+  assert.deepEqual(installation, { token: "scoped-token", login: "benedict[bot]" })
   assert.equal(calls[0]?.url, "https://api.github.com/repos/acme/project/installation")
   assert.equal(calls[1]?.url, "https://api.github.com/app/installations/9/access_tokens")
   assert.deepEqual(calls[1]?.body, { repositories: ["project"], permissions: { pull_requests: "write", contents: "read" } })

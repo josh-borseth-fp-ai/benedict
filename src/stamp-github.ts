@@ -15,7 +15,7 @@ export const appJwt = (appId: string, privateKey: KeyObject, nowSeconds: number)
 
 export interface Installation {
   readonly token: string
-  /** The app's bot login, e.g. `review-agent[bot]`. */
+  /** The app's bot login, e.g. `benedict[bot]`. */
   readonly login: string
 }
 
@@ -26,7 +26,7 @@ const AccessToken = Schema.Struct({ token: Schema.String })
 export class StampGitHub extends Context.Service<StampGitHub, {
   readonly installation: (repository: string) => Effect.Effect<Installation, StampError>
   readonly request: (token: string, method: "GET" | "POST", endpoint: string, body?: unknown) => Effect.Effect<unknown, StampError>
-}>()("review/StampGitHub") {
+}>()("benedict/StampGitHub") {
   static readonly layer = (appId: string, privateKey: KeyObject) => Layer.effect(StampGitHub, Effect.gen(function*() {
     const http = yield* HttpClient.HttpClient
     const send = Effect.fn("StampGitHub.send")(function*(token: string, method: "GET" | "POST", endpoint: string, body?: unknown, approval = false) {
@@ -60,7 +60,7 @@ export class StampGitHub extends Context.Service<StampGitHub, {
       installation: Effect.fn("StampGitHub.installation")(function*(repository: string) {
         const jwt = appJwt(appId, privateKey, Math.floor((yield* Clock.currentTimeMillis) / 1000))
         const installation = yield* send(jwt, "GET", `repos/${repository}/installation`).pipe(
-          Effect.catchIf(error => error.code === "github_not_found", () => Effect.fail(stampError("repository_disabled", "The Review Agent GitHub App is not installed on this repository.")))
+          Effect.catchIf(error => error.code === "github_not_found", () => Effect.fail(stampError("repository_disabled", "The Benedict GitHub App is not installed on this repository.")))
         )
         const info = yield* decode(InstallationInfo, installation)
         const token = yield* decode(AccessToken, yield* send(jwt, "POST", `app/installations/${info.id}/access_tokens`, {
