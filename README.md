@@ -216,15 +216,15 @@ The integration tests run the built executable against temporary repositories an
 
 ## Stamp a PR
 
-Ask the agent to **review and stamp** a PR. After the whole-PR review and publication, it runs:
+A stamp is a GitHub approval from the organization's **Review Agent** GitHub App, based on the review your local agent just completed. After the whole-PR review is published, the agent runs:
 
 ```sh
 review stamp approve /tmp/findings.json --repo /path/to/project \
   --pr https://github.com/ORG/REPO/pull/123 \
-  --base <reviewed-merge-base> --head <reviewed-head>
+  --base <reviewed-merge-base> --head <reviewed-head> --confidence 4
 ```
 
-`review stamp approve` checks the original findings again, requires zero accepted findings, verifies the current whole-PR range, and reads stamping settings from the base branch. It then calls the shared stamp service directly. `--dry-run` validates and previews without calling that service.
+A PR qualifies when the review has **zero accepted findings** and an **overall confidence of 4/5 or 5/5**. `review stamp approve` checks the original findings again and verifies the current whole-PR range. It finds your published review comment for that range and confirms that it records the same confidence. It reads the stamp settings from the base branch, then calls the approval service. `--dry-run` validates and previews without calling the service.
 
 ```yaml
 stamp:
@@ -238,15 +238,33 @@ stamp:
 
 Set the trusted endpoint as `REVIEW_STAMP_URL` and its approval key as `REVIEW_STAMP_KEY` through your normal local configuration. The CLI sends the key in a header and never includes it in its report. The base branch's `stamp.service` must match the locally trusted URL before any key is sent. Review policy settings and the authorized service URL belong on the base branch, so a PR cannot enable its own stamping.
 
-The [stamp service](stamp-service/README.md) rewrites the shared reviewer pool and approval behavior from [ForwardPathAI/fp-git-helper](https://github.com/ForwardPathAI/fp-git-helper) in Effect TypeScript. Run it once with `review stamp serve` behind HTTPS. Reviewers opt in with `review stamp enroll`, then authorize the displayed device code on GitHub. Administrators use `review stamp users` and `review stamp remove USERNAME`. Enrollment and administration have separate keys; setup is documented in the service guide. No custom frontend, Python, Teams connection or local MCP setup is required.
+The [approval service](stamp-service/README.md) runs with `review stamp serve` behind HTTPS. It holds the GitHub App's private key and has no database. For each request, it creates a token limited to the one repository and repeats the CLI's checks against GitHub. It also confirms the published review comment, then approves as `<app>[bot]` at the reviewed commit, labelled **Review Agent — automated approval**. The app's installation determines which repositories can be stamped. The service does not run a model; your local agent owns the review.
 
-The service excludes the PR author, chooses another eligible account, submits an approval at the reviewed commit, and labels that approval **Review Agent — automated approval**. Developers need the existing review CLI and the approval key.
+The CLI and service refuse:
 
-The CLI and service refuse closed/draft PRs, stale or partial reviews, accepted findings, protected paths and changes over the size limit. Config files, the review skill and service code are protected by default. Binary or unavailable text patches require manual review. The service also enforces an administrator-configured repository allowlist and reserves each PR/head pair so concurrent requests cannot submit duplicate approvals. It tries another account only after an explicit GitHub refusal. An uncertain write leaves a pending reservation for inspection instead of retrying.
+- closed or draft PRs, and stale or partial reviews;
+- accepted findings, or confidence below 4/5;
+- a missing or mismatched published review;
+- protected paths and changes over the size limit.
 
-GitHub still displays the opted-in account as the reviewer. The approval body identifies the automated review and its commits. Whether that approval satisfies branch requirements depends on the account's permissions and repository rules. Enable dismissal of stale approvals in the repository's branch rules.
+Config files, the review skill and stamp code are protected by default. Binary or unavailable text patches require manual review.
 
-The previous Teams scripts are replaced by this CLI command. Old `stamp.team` and `stamp.channel` fields remain parseable for existing configs, but stamping now requires `stamp.service`. Mechanical validation cannot prove the AI's defect assessment; the approval still depends on the completed review.
+Repeated requests are safe. The service returns `already-approved` when the bot already approved that commit. It refuses when that approval was dismissed. After a timeout, rerun the same command.
+
+Whether the bot's approval satisfies branch requirements depends on repository rules. A GitHub App cannot be a code owner, so required code-owner reviews still need a person. Enable dismissal of stale approvals so new commits need a new review.
+
+To require a review and stamp on every PR, add this to a repository's `AGENTS.md`:
+
+```md
+## Review agent
+
+After opening a PR or pushing to one, use the `review` skill to review the whole
+current PR, publish the review, and stamp it. Fix accepted findings and repeat.
+If the stamp is refused, report the reason and request human review; do not
+approve the PR another way.
+```
+
+Anyone with the approval key can request a stamp, including for their own PR. The base-branch rules, bot attribution, linked review comment and stale-approval dismissal limit that and make it visible. Rotate the key when someone leaves. Mechanical validation cannot prove the AI's defect assessment; the approval depends on the completed review.
 
 Service tests are part of `npm test`, and can also be run with:
 
