@@ -80,7 +80,7 @@ export const publishReview = Effect.fn("Review.publish")(function*(options: Publ
   if (pr.state !== "open") return yield* new ReviewError({ code: "pr_closed", message: "The target PR is closed." })
   const resolveMergeBase = git.run(options.repo, ["merge-base", pr.base.sha, pr.head.sha]).pipe(
     Effect.map((value) => value.trim()),
-    Effect.mapError(() => new ReviewError({ code: "range_error", message: "Cannot resolve the PR merge base locally. Fetch the PR head and base before retrying." }))
+    Effect.mapError(() => new ReviewError({ code: "range_error", message: "Cannot resolve the PR merge base locally. Run review context --pr to fetch the PR commits, or fetch them manually, before retrying." }))
   )
   const base = options.base ?? (yield* resolveMergeBase)
   const snapshot = yield* collectSnapshot({ repo: options.repo, base, head: options.head, config: options.config, worktree: false })

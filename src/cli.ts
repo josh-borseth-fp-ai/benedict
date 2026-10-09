@@ -6,6 +6,8 @@ import { collectSnapshot } from "./context.js"
 import { Git } from "./git.js"
 import { GitHub } from "./github.js"
 import { publishReview } from "./publish.js"
+import { resolvePullRequest } from "./pull-request.js"
+import { ReviewError } from "./model.js"
 import type { CheckReport, ReviewContext, ReviewOptions } from "./model.js"
 import { setup } from "./setup.js"
 import { stampReview } from "./stamp.js"
@@ -36,6 +38,7 @@ const rangeText = (context: Pick<ReviewContext, "range">) => `${context.range.ba
 const contextText = (context: ReviewContext): string => [
   `Repository: ${context.repository}`,
   `Range: ${rangeText(context)}`,
+  ...(context.pullRequest ? [`Pull request: ${context.pullRequest.url}`] : []),
   `Policy: severity >= ${context.config.minimumSeverity}, confidence >= ${context.config.minimumConfidence}`,
   ...(context.config.organization ? [`Organization: ${context.config.organization.source} @ ${context.config.organization.revision}`] : []),
   ...context.files.map((file) => `${file.status} ${JSON.stringify(file.path)} (${file.reviewable ? `${file.lineCount} lines; ${file.skills.join(", ") || "no permitted lenses"}` : "not reviewable"})`),
@@ -53,9 +56,19 @@ const reportText = (report: CheckReport): string => [
   ...report.rejected.map((item) => `Rejected draft ${item.index}: ${item.reasons.map((reason) => `${reason.code}: ${reason.message}`).join("; ")}`)
 ].join("\n\n")
 
-const contextCommand = Command.make("context", rangeFlags, Effect.fn(function*(flags) {
-  const snapshot = yield* collectSnapshot(optionsFrom(flags))
-  yield* Console.log(flags.format === "json" ? JSON.stringify(snapshot.context, null, 2) : contextText(snapshot.context))
+const contextCommand = Command.make("context", {
+  ...rangeFlags,
+  pr: Flag.String("pr").pipe(Flag.optional, Flag.withDescription("Full GitHub PR URL; reviews its merge base (or --base) through its current head, fetching missing commits"))
+}, Effect.fn(function*(flags) {
+  const options = optionsFrom(flags)
+  const pr = Option.getOrUndefined(flags.pr)
+  if (pr !== undefined && (options.worktree || options.head !== undefined)) {
+    return yield* new ReviewError({ code: "range_error", message: "--pr selects the PR head; it cannot be combined with --head or --worktree." })
+  }
+  const resolved = pr === undefined ? undefined : yield* resolvePullRequest(options.repo, pr, options.base)
+  const snapshot = yield* collectSnapshot(resolved === undefined ? options : { ...options, base: resolved.base, head: resolved.head })
+  const context: ReviewContext = resolved === undefined ? snapshot.context : { ...snapshot.context, pullRequest: { url: resolved.url } }
+  yield* Console.log(flags.format === "json" ? JSON.stringify(context, null, 2) : contextText(context))
 })).pipe(Command.withDescription("Gather changed files, patches and applicable review policy."))
 
 const checkCommand = Command.make("check", {

@@ -130,6 +130,7 @@ export interface ReviewContext {
   readonly formatVersion: 1
   readonly repository: string
   readonly range: ReviewRange
+  readonly pullRequest?: { readonly url: string }
   readonly config: ReviewConfig
   readonly files: ReadonlyArray<ChangedFile>
 }

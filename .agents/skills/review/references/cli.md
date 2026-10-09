@@ -9,7 +9,7 @@ review context --repo /path/to/project --base HEAD~1 --head HEAD
 review context --repo /path/to/project --worktree
 ```
 
-JSON is the default output. `--format text` produces a readable summary. Both commands accept `--repo`, `--base`, `--head`, `--worktree`, `--config`, and `--format`. `--worktree` and `--head` cannot be combined.
+JSON is the default output. `--format text` produces a readable summary. Both commands accept `--repo`, `--base`, `--head`, `--worktree`, `--config`, and `--format`. `--worktree` and `--head` cannot be combined. `context` also accepts `--pr` for a GitHub PR; see the [GitHub PR workflow](#github-pr-workflow).
 
 The default commit range is `HEAD~1` to `HEAD`; the default worktree base is `HEAD`. The context contains resolved commit hashes, changed files, patches, line counts, changed lines, permitted correctness/security lenses, and repository rules. Commit source comes from Git. Worktree source is the current on-disk content, including staged, unstaged, and untracked files that Git does not ignore.
 
@@ -63,15 +63,15 @@ When organization knowledge is configured, include the source and organization r
 
 ## GitHub PR workflow
 
-Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with access to the destination PR. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL. Obtain the PR's base and head hashes:
+Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with access to the destination PR. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL:
 
 ```sh
-gh api --hostname github.com repos/OWNER/REPO/pulls/NUMBER --jq '.base.sha, .head.sha'
-git merge-base <pr-base-hash> <pr-head-hash>
-review context --repo /path/to/project --base <merge-base-hash> --head <pr-head-hash>
+review context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/NUMBER
 ```
 
-The commits must exist in the local repository. Fetch the base and PR head if necessary. Investigate that resolved range, then use the same hashes with `check` and `publish`. A user-selected narrower range may start at an ancestor of the PR head within the PR range.
+`--pr` reads the PR's current base and head with `gh`, reviews their merge base through the PR head, and reports the resolved hashes in `range` and the PR in `pullRequest.url`. The diff and source still come from local Git. If either commit is missing locally, the CLI fetches the PR head and base branch from the remote whose URL points to `github.com/OWNER/REPO`, without moving local branches or changing files. With no matching remote, add one or fetch the commits yourself. `--pr` cannot be combined with `--head` or `--worktree`. A user-selected narrower range may pass `--base` with an ancestor of the PR head inside the PR range.
+
+Investigate that resolved range, then pass the returned `range.base` and `range.head` hashes to `check` and `publish`. Do not pass `--pr` to `check`: the PR head may move during the review, and the fixed hashes keep the reviewed source unchanged.
 
 ```sh
 review publish /tmp/findings.json --repo /path/to/project \
