@@ -7,8 +7,8 @@ import { Git } from "./git.js"
 import { GitHub } from "./github.js"
 import { ConfigFile, ReviewError, configPath } from "./model.js"
 import { parseJson } from "./policy.js"
-import { parsePullRequest } from "./publish.js"
-import { protectedPaths, serviceUrl } from "./stamp-protocol.js"
+import { commentMarker, parsePullRequest } from "./publish.js"
+import { minimumConfidence, protectedPaths, publishedConfidence, serviceUrl } from "./stamp-protocol.js"
 export { serviceUrl } from "./stamp-protocol.js"
 
 const Sha = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))
@@ -16,6 +16,8 @@ const Pr = Schema.Struct({
   state: Schema.String, draft: Schema.Boolean,
   head: Schema.Struct({ sha: Sha }), base: Schema.Struct({ sha: Sha })
 })
+const User = Schema.Struct({ id: Schema.Int })
+const Comment = Schema.Struct({ html_url: Schema.String, body: Schema.NullOr(Schema.String), user: User })
 const Response = Schema.Struct({
   action: Schema.Literals(["approved", "already-approved"]),
   pr: Schema.String, head: Sha, approvedBy: Schema.String, reviewUrl: Schema.String
@@ -28,6 +30,7 @@ export interface StampOptions {
   readonly config?: string
   readonly findings: string
   readonly pr: string
+  readonly confidence: number
   readonly dryRun: boolean
 }
 
@@ -35,6 +38,8 @@ const fail = (code: string, message: string) => new ReviewError({ code, message 
 
 export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOptions) {
   const target = yield* Effect.try({ try: () => parsePullRequest(options.pr), catch: (e) => fail("input_error", String(e)) })
+  if (!Number.isInteger(options.confidence) || options.confidence < 1 || options.confidence > 5) return yield* fail("input_error", "--confidence must be an integer from 1 to 5.")
+  if (options.confidence < minimumConfidence) return yield* fail("stamp_refused", `Overall confidence ${options.confidence}/5 is below ${minimumConfidence}/5; request human review instead of stamping.`)
   const drafts = yield* readFindings(options.findings)
   const snapshot = yield* collectSnapshot({ ...options, worktree: false })
   const report = yield* checkFindings(snapshot, drafts)
@@ -76,10 +81,26 @@ export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOpt
     if (blocked) return yield* fail("stamp_refused", `The PR changes ${path}, protected by ${blocked}.`)
   }
   if (changedLines > (stamp.maxChangedLines ?? 400)) return yield* fail("stamp_refused", "The PR exceeds stamp.maxChangedLines.")
+  // The approval links the review published by this account, which must record the same range and confidence.
+  const user = yield* gh.request("GET", "user").pipe(Effect.flatMap(Schema.decodeUnknownEffect(User)), Effect.mapError(() => fail("github_error", "Cannot read the signed-in GitHub account.")))
+  const published: Array<typeof Comment.Type> = []
+  for (let page = 1; ; page++) {
+    const comments = yield* gh.request("GET", `repos/${target.repository}/issues/${target.number}/comments?per_page=100&page=${page}`).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Comment))),
+      Effect.mapError(() => fail("github_error", "Cannot read the PR comments. No stamp was sent."))
+    )
+    published.push(...comments.filter(comment => comment.user.id === user.id && comment.body?.startsWith(`${commentMarker}\n`)))
+    if (comments.length < 100) break
+  }
+  if (published.length !== 1) return yield* fail("publish_required", "Publish exactly one review comment for this PR with review publish before stamping.")
+  const recorded = publishedConfidence(published[0]!.body ?? "", mergeBase, pr.head.sha)
+  if (recorded === undefined) return yield* fail("publish_required", "The published review must cover this whole-PR range, have zero accepted findings, and state one **Confidence: N/5** score. Publish the current review before stamping.")
+  if (recorded !== options.confidence) return yield* fail("stamp_refused", `--confidence ${options.confidence} does not match the published review's ${recorded}/5.`)
   const request = {
-    version: 1, pr: target.url, base: mergeBase, head: pr.head.sha,
+    version: 2, pr: target.url, base: mergeBase, head: pr.head.sha,
     findings: report.accepted, dropped: report.summary.rejected,
-    skills: snapshot.context.config.skills
+    skills: snapshot.context.config.skills,
+    confidence: options.confidence, reviewComment: published[0]!.html_url
   }
   if (options.dryRun) return { action: "dry-run" as const, pr: target.url, head: pr.head.sha, service, request, reviewUrl: null }
   // A repository can authorize stamping, but cannot choose the destination for a locally configured secret.
@@ -98,13 +119,19 @@ export const stampReview = Effect.fn("Review.stamp")(function*(options: StampOpt
     const response = yield* http.execute(HttpClientRequest.post(service).pipe(
       HttpClientRequest.setHeader("x-review-key", key), HttpClientRequest.bodyJsonUnsafe(request)
     ))
-    if (response.status < 200 || response.status >= 300) return yield* Effect.fail(new Error("Stamp request refused."))
-    return yield* response.json
+    if (response.status >= 200 && response.status < 300) return yield* response.json
+    // A refusal is definite; report the service's reason instead of the generic uncertain-outcome error.
+    const refusal = yield* response.json.pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({ error: Schema.Struct({ code: Schema.String, message: Schema.String }) }))),
+      Effect.orElseSucceed(() => undefined)
+    )
+    if (refusal && response.status < 500) return yield* Effect.fail(fail(response.status === 401 ? "stamp_auth" : "stamp_refused", `Stamp service refused (HTTP ${response.status}, ${refusal.error.code}): ${refusal.error.message}`))
+    return yield* Effect.fail(new Error("Stamp request failed."))
   }).pipe(
     Effect.timeout("30 seconds"),
     Effect.provide(FetchHttpClient.layer),
     Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
-    Effect.mapError(() => fail("stamp_service_error", "Stamp service request failed. An approval may have reached GitHub; inspect the PR before retrying. No automatic retry was made."))
+    Effect.mapError((error) => error instanceof ReviewError ? error : fail("stamp_service_error", "Stamp service request failed. An approval may have reached GitHub; rerunning the same command is safe because the service detects an existing approval. No automatic retry was made."))
   )
   const decoded = yield* Schema.decodeUnknownEffect(Response)(result).pipe(
     Effect.mapError(() => fail("stamp_service_error", "Unexpected stamp service response; inspect the PR before retrying."))

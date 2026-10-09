@@ -1,39 +1,23 @@
-import { randomBytes, randomInt } from "node:crypto"
-import { Clock, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import picomatch from "picomatch"
 import { ConfigFile, configPath } from "./model.js"
 import { parseJson } from "./policy.js"
 import { parsePullRequest } from "./publish.js"
 import { StampGitHub } from "./stamp-github.js"
-import { StampStore } from "./stamp-store.js"
-import type { Enrollment, Reviewer } from "./stamp-store.js"
-import { EnrollmentPoll, EnrollmentStart, PositiveInt, Sha, StampReport, protectedPaths, stampError } from "./stamp-protocol.js"
+import { minimumConfidence, protectedPaths, publishedConfidence, Sha, StampReport, stampError } from "./stamp-protocol.js"
 import type { StampResult } from "./stamp-protocol.js"
 
-const Identity = Schema.Struct({ id: PositiveInt, login: Schema.String })
+const Identity = Schema.Struct({ id: Schema.Int, login: Schema.String })
 const Pr = Schema.Struct({ state: Schema.String, draft: Schema.Boolean, head: Schema.Struct({ sha: Sha }), base: Schema.Struct({ sha: Sha }), user: Identity, changed_files: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) })
 type Pr = typeof Pr.Type
 const File = Schema.Struct({ filename: Schema.String, previous_filename: Schema.optional(Schema.String), additions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), deletions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), patch: Schema.optional(Schema.String) })
-const Review = Schema.Struct({ state: Schema.String, commit_id: Schema.NullOr(Sha), html_url: Schema.String, user: Identity, body: Schema.NullOr(Schema.String) })
-const Tokens = Schema.Struct({ access_token: Schema.String, refresh_token: Schema.optional(Schema.String), expires_in: Schema.optional(PositiveInt) })
-const Device = Schema.Struct({ device_code: Schema.String, user_code: Schema.String, verification_uri: Schema.Literal("https://github.com/login/device"), expires_in: PositiveInt, interval: PositiveInt })
-const OAuthError = Schema.Struct({ error: Schema.String, interval: Schema.optional(PositiveInt) })
+const Review = Schema.Struct({ state: Schema.String, commit_id: Schema.NullOr(Sha), html_url: Schema.String, user: Schema.NullOr(Identity) })
+const Comment = Schema.Struct({ body: Schema.NullOr(Schema.String), issue_url: Schema.String })
 
 const decode = <S extends Schema.Top>(schema: S, value: unknown) => Schema.decodeUnknownEffect(schema)(value).pipe(
   Effect.mapError(() => stampError("invalid_response", "The stamp service received an invalid response.", 502))
 )
-const signature = (pr: Pr) => [pr.state, pr.draft, pr.head.sha, pr.base.sha, pr.user.id].join(":")
-
-export const reviewerToken = Effect.fn("Stamp.reviewerToken")(function*(user: Reviewer) {
-  const now = yield* Clock.currentTimeMillis
-  if (user.expiresAt === 0 || user.expiresAt > now + 300_000) return user.accessToken
-  if (!user.refreshToken) return yield* stampError("reviewer_expired", "Reviewer authorization expired; enroll again.")
-  const gh = yield* StampGitHub
-  const tokens = yield* decode(Tokens, yield* gh.oauth("refresh", { refresh_token: user.refreshToken }))
-  const store = yield* StampStore
-  yield* store.saveUser({ ...user, accessToken: tokens.access_token, refreshToken: tokens.refresh_token ?? user.refreshToken, expiresAt: tokens.expires_in ? now + tokens.expires_in * 1000 : 0 })
-  return tokens.access_token
-})
+const signature = (pr: Pr) => [pr.state, pr.draft, pr.head.sha, pr.base.sha].join(":")
 
 const pages = Effect.fn("Stamp.pages")(function*<S extends Schema.Top>(token: string, endpoint: string, schema: S, maxPages = 100) {
   const gh = yield* StampGitHub
@@ -78,122 +62,54 @@ const checkPolicy = Effect.fn("Stamp.checkPolicy")(function*(token: string, repo
   if (lines > (stamp.maxChangedLines ?? 400)) return yield* stampError("size_limit", "The PR exceeds stamp.maxChangedLines.")
 })
 
-/** State and writes are owned by Effects; only explicit GitHub rejections allow another candidate. */
-export const approveStamp = Effect.fn("Stamp.approve")(function*(value: unknown, allowed: ReadonlyArray<string>, service: string) {
-  const report = yield* Schema.decodeUnknownEffect(StampReport, { onExcessProperty: "error" })(value).pipe(Effect.mapError(() => stampError("invalid_report", "Invalid version-1 stamp report.", 400)))
+/** The published review must be this PR's comment for the same range, with no findings and the requested confidence. */
+const checkReviewComment = Effect.fn("Stamp.checkReviewComment")(function*(token: string, repository: string, report: StampReport) {
+  const target = parsePullRequest(report.pr)
+  const match = /^(.+)#issuecomment-([1-9]\d*)$/.exec(report.reviewComment)
+  if (!match || match[1] !== target.url) return yield* stampError("invalid_report", "reviewComment must be a comment URL on the stamped PR.", 400)
+  const gh = yield* StampGitHub
+  const comment = yield* gh.request(token, "GET", `repos/${repository}/issues/comments/${match[2]}`).pipe(
+    Effect.catchIf(error => error.code === "github_not_found", () => Effect.fail(stampError("review_missing", "The published review comment was not found."))),
+    Effect.flatMap(value => decode(Comment, value))
+  )
+  if (comment.issue_url.toLowerCase() !== `https://api.github.com/repos/${repository}/issues/${target.number}`.toLowerCase()) {
+    return yield* stampError("review_missing", "The review comment belongs to a different PR.")
+  }
+  if (publishedConfidence(comment.body ?? "", report.base, report.head) !== report.confidence) {
+    return yield* stampError("review_mismatch", "The published review does not record this range, zero accepted findings and the requested confidence.")
+  }
+})
+
+/** One GitHub App approves; GitHub's review list, not a database, makes repeated requests idempotent. */
+export const approveStamp = Effect.fn("Stamp.approve")(function*(value: unknown, service: string) {
+  const report = yield* Schema.decodeUnknownEffect(StampReport, { onExcessProperty: "error" })(value).pipe(Effect.mapError(() => stampError("invalid_report", "Invalid version-2 stamp report.", 400)))
   const target = yield* Effect.try({ try: () => parsePullRequest(report.pr), catch: () => stampError("invalid_report", "Use a full GitHub PR URL.", 400) })
-  if (!allowed.some(name => name.toLowerCase() === target.repository.toLowerCase())) return yield* stampError("repository_disabled", "This repository is not enabled on the service.")
   if (report.findings.length > 0) return yield* stampError("findings", "Accepted findings must be resolved before stamping.")
-  const store = yield* StampStore
+  if (report.confidence < minimumConfidence) return yield* stampError("low_confidence", `Overall confidence ${report.confidence}/5 is below ${minimumConfidence}/5; request human review.`)
   const gh = yield* StampGitHub
-  const candidates = [...(yield* store.users())]
-  yield* Effect.sync(() => { for (let i = candidates.length - 1; i > 0; i--) { const j = randomInt(i + 1); [candidates[i], candidates[j]] = [candidates[j]!, candidates[i]!] } })
+  const { token, login } = yield* gh.installation(target.repository)
   const endpoint = `repos/${target.repository}/pulls/${target.number}`
-  const key = `${target.repository}~${target.number}`
-  const marker = `<!-- review-agent-stamp:${report.head} -->`
-  const body = `🤖 **Review Agent — automated approval**\n\nReviewed \`${report.base}\` → \`${report.head}\`.\n\nAccepted findings: 0 · drafts dropped: ${report.dropped}.\n\nThis approval was submitted by the review agent through an opted-in GitHub reviewer account.\n\n${marker}`
-  let baseline: Pr | undefined
-  let reserved = false
-  let failures = 0
-  for (const user of candidates) {
-    const tokenResult = yield* reviewerToken(user).pipe(Effect.result)
-    if (tokenResult._tag === "Failure") { if (++failures >= 5) break; continue }
-    const token = tokenResult.success
-    const preflight = yield* Effect.gen(function*() {
-      const identity = yield* decode(Identity, yield* gh.request(token, "GET", "user"))
-      const pr = yield* decode(Pr, yield* gh.request(token, "GET", endpoint))
-      return { identity, pr }
-    }).pipe(Effect.result)
-    if (preflight._tag === "Failure") { if (++failures >= 5) break; continue }
-    const { identity, pr } = preflight.success
-    if (identity.id !== user.id || identity.id === pr.user.id) continue
-    if (!baseline) {
-      yield* checkPolicy(token, target.repository, pr, report, service)
-      baseline = pr
-      const existing = yield* store.reserve(key, report.head)
-      if (existing) {
-        if (existing.status !== "approved" || !existing.result) return yield* stampError("stamp_pending", "A stamp for this commit is pending; inspect GitHub before clearing its reservation.")
-        const reviews = yield* pages(token, `${endpoint}/reviews`, Review)
-        if (!reviews.some(review => review.state === "APPROVED" && review.commit_id === report.head && review.html_url === existing.result!.reviewUrl)) return yield* stampError("stamp_dismissed", "The previous stamp was dismissed; reconcile that approval before stamping again.")
-        return { ...existing.result, action: "already-approved" as const }
-      }
-      reserved = true
-    }
-    const reviews = yield* pages(token, `${endpoint}/reviews`, Review)
-    const recovered = reviews.find(review => review.state === "APPROVED" && review.commit_id === report.head && review.body?.includes(marker) && candidates.some(candidate => candidate.id === review.user.id))
-    if (recovered) {
-      const result: StampResult = { action: "already-approved", pr: target.url, head: report.head, approvedBy: recovered.user.login, reviewUrl: recovered.html_url }
-      yield* store.complete(key, report.head, result)
-      return result
-    }
-    const current = yield* decode(Pr, yield* gh.request(token, "GET", endpoint))
-    if (signature(current) !== signature(baseline) || signature(pr) !== signature(baseline)) {
-      yield* store.release(key, report.head)
-      return yield* stampError("stale_review", "The PR changed before approval; review its current range.")
-    }
-    // Finish write and persistence even if the HTTP caller disconnects. Unknown writes retain the reservation.
-    const write = yield* Effect.uninterruptible(Effect.gen(function*() {
-      const raw = yield* gh.request(token, "POST", `${endpoint}/reviews`, { event: "APPROVE", commit_id: report.head, body })
-      const review = yield* decode(Review, raw)
-      if (review.state !== "APPROVED" || review.commit_id !== report.head || review.user.id !== identity.id || !review.html_url.startsWith(`${target.url}#pullrequestreview-`)) return yield* stampError("write_uncertain", "GitHub returned an unexpected approval; inspect the PR.", 502)
-      const result: StampResult = { action: "approved", pr: target.url, head: report.head, approvedBy: identity.login, reviewUrl: review.html_url }
-      yield* store.complete(key, report.head, result)
-      return result
-    })).pipe(Effect.result)
-    if (write._tag === "Success") return write.success
-    if (write.failure.code !== "review_rejected") return yield* stampError("write_uncertain", "Stamp outcome is uncertain; inspect GitHub and the pending reservation before retrying.", 502)
-    if (++failures >= 5) break
+  const pr = yield* decode(Pr, yield* gh.request(token, "GET", endpoint))
+  yield* checkPolicy(token, target.repository, pr, report, service)
+  yield* checkReviewComment(token, target.repository, report)
+  const ours = (yield* pages(token, `${endpoint}/reviews`, Review)).filter(review => review.user?.login === login && review.commit_id === report.head)
+  const approved = ours.find(review => review.state === "APPROVED")
+  if (approved) return { action: "already-approved", pr: target.url, head: report.head, approvedBy: login, reviewUrl: approved.html_url } satisfies StampResult
+  if (ours.some(review => review.state === "DISMISSED")) return yield* stampError("stamp_dismissed", "The Review Agent approval for this commit was dismissed; a person must approve it.")
+  const current = yield* decode(Pr, yield* gh.request(token, "GET", endpoint))
+  if (signature(current) !== signature(pr)) return yield* stampError("stale_review", "The PR changed before approval; review its current range.")
+  const body = [
+    "🤖 **Review Agent — automated approval**",
+    `Reviewed \`${report.base}\` → \`${report.head}\`.`,
+    `Accepted findings: 0 · drafts dropped: ${report.dropped} · overall confidence: ${report.confidence}/5.`,
+    `Review: ${report.reviewComment}`,
+    "A developer's local AI review agent reviewed this PR; the Review Agent GitHub App submitted this approval. Branch rules decide whether it satisfies merge requirements.",
+    `<!-- review-agent-stamp:${report.head} -->`
+  ].join("\n\n")
+  // Finish the write even if the HTTP caller disconnects.
+  const review = yield* Effect.uninterruptible(gh.request(token, "POST", `${endpoint}/reviews`, { event: "APPROVE", commit_id: report.head, body }).pipe(Effect.flatMap(raw => decode(Review, raw))))
+  if (review.state !== "APPROVED" || review.commit_id !== report.head || review.user?.login !== login || !review.html_url.startsWith(`${target.url}#pullrequestreview-`)) {
+    return yield* stampError("write_uncertain", "GitHub returned an unexpected approval; inspect the PR.", 502)
   }
-  if (reserved) yield* store.release(key, report.head)
-  return yield* stampError("no_reviewer", "No eligible opted-in reviewer could approve this PR.")
-})
-
-export const beginEnrollment = Effect.fn("Stamp.beginEnrollment")(function*() {
-  const gh = yield* StampGitHub
-  const device = yield* decode(Device, yield* gh.oauth("device"))
-  const now = yield* Clock.currentTimeMillis
-  const enrollment = yield* Effect.sync(() => randomBytes(32).toString("hex"))
-  const store = yield* StampStore
-  yield* store.createEnrollment(enrollment, { status: "pending", deviceCode: device.device_code, expiresAt: now + device.expires_in * 1000, interval: device.interval, nextPollAt: now + device.interval * 1000 })
-  return yield* decode(EnrollmentStart, { enrollment, userCode: device.user_code, verificationUri: device.verification_uri, expiresIn: device.expires_in, interval: device.interval })
-})
-
-export const pollEnrollment = Effect.fn("Stamp.pollEnrollment")(function*(id: string) {
-  if (!/^[a-f0-9]{64}$/.test(id)) return yield* stampError("invalid_enrollment", "Invalid enrollment ID.", 400)
-  const store = yield* StampStore
-  const { value, etag } = yield* store.enrollment(id)
-  const now = yield* Clock.currentTimeMillis
-  if (value.expiresAt <= now) return yield* stampError("enrollment_expired", "Enrollment expired; run enroll again.")
-  if (value.status === "enrolled" && value.username) return { status: "enrolled" as const, username: value.username }
-  if (value.status === "polling") return { status: "pending" as const, interval: value.interval }
-  if (now < value.nextPollAt) return { status: "pending" as const, interval: Math.max(1, Math.ceil((value.nextPollAt - now) / 1000)) }
-  const next: Enrollment = { ...value, status: "polling", nextPollAt: now + value.interval * 1000 }
-  // Claim the exchange with an ETag. Unknown outcomes stay claimed until expiration;
-  // a second caller cannot consume the same device code during a slow request.
-  yield* store.updateEnrollment(id, next, etag)
-  const locked = yield* store.enrollment(id)
-  const gh = yield* StampGitHub
-  const raw = yield* gh.oauth("poll", { device_code: value.deviceCode, grant_type: "urn:ietf:params:oauth:grant-type:device_code" })
-  const tokens = yield* decode(Tokens, raw).pipe(Effect.result)
-  if (tokens._tag === "Failure") {
-    const error = yield* decode(OAuthError, raw)
-    const completedAt = yield* Clock.currentTimeMillis
-    if (error.error === "authorization_pending") {
-      yield* store.updateEnrollment(id, { ...next, status: "pending", nextPollAt: completedAt + value.interval * 1000 }, locked.etag)
-      return { status: "pending" as const, interval: value.interval }
-    }
-    if (error.error === "slow_down") {
-      const interval = Math.max(error.interval ?? value.interval + 5, value.interval + 5)
-      yield* store.updateEnrollment(id, { ...next, status: "pending", interval, nextPollAt: completedAt + interval * 1000 }, locked.etag)
-      return { status: "pending" as const, interval }
-    }
-    return yield* stampError("enrollment_refused", "GitHub enrollment was refused or expired; start again.")
-  }
-  const identity = yield* decode(Identity, yield* gh.request(tokens.success.access_token, "GET", "user"))
-  const user: Reviewer = { username: identity.login, id: identity.id, accessToken: tokens.success.access_token, refreshToken: tokens.success.refresh_token ?? "", expiresAt: tokens.success.expires_in ? now + tokens.success.expires_in * 1000 : 0 }
-  yield* Effect.uninterruptible(Effect.gen(function*() {
-    yield* store.saveUser(user)
-    yield* store.updateEnrollment(id, { ...next, status: "enrolled", username: identity.login, deviceCode: "" }, locked.etag)
-  }))
-  return yield* decode(EnrollmentPoll, { status: "enrolled", username: identity.login })
+  return { action: "approved", pr: target.url, head: report.head, approvedBy: login, reviewUrl: review.html_url } satisfies StampResult
 })

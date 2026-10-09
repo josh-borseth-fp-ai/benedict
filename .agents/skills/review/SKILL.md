@@ -110,20 +110,22 @@ Use `--dry-run --format text` when you need to inspect the exact comment. Report
 
 ## Stamp
 
-Only stamp when the user asks you to review and stamp a GitHub PR. A stamp directly submits a GitHub approval through the shared, opted-in reviewer pool. It is outward-facing and carries AI attribution.
+Stamp when the user asks you to review and stamp a GitHub PR, or when the repository's agent instructions (for example `AGENTS.md`) require a review and stamp for its PRs. A stamp directly submits a GitHub approval from the organization's Review Agent GitHub App. It is outward-facing and carries AI attribution.
 
-Review the whole current PR from its merge base through its head, publish the review as above, then run:
+Review the whole current PR from its merge base through its head. Publish the review as above, with `**Confidence: N/5**` stated once in the context file. If there are no accepted findings and the score is 4 or 5, run:
 
 ```sh
 review stamp approve /tmp/findings.json --repo /path/to/repository \
   --pr https://github.com/ORG/REPO/pull/123 \
-  --base <resolved-merge-base> --head <reviewed-head>
+  --base <resolved-merge-base> --head <reviewed-head> --confidence N
 ```
 
-Pass the original draft findings and the same resolved hashes/config used by `context` and `check`. The CLI revalidates findings and requires no accepted findings. It reads stamp authorization, the service endpoint, protected paths and the size limit from the PR's base commit. `--dry-run` previews the request without contacting the stamp service.
+Pass the original draft findings, the same resolved hashes and config used by `context` and `check`, and the published score. The CLI revalidates findings and requires none to be accepted. It requires your published review comment for that range to record the same confidence. It reads stamp authorization, the service endpoint, protected paths and the size limit from the PR's base commit. `--dry-run` previews the request without contacting the stamp service.
+
+Choose the score before deciding whether to stamp. Never raise it to qualify. With accepted findings or a score below 4, do not stamp; report the review and request human review.
 
 The base branch must configure `stamp.enabled` and `stamp.service`, and the user must have configured `REVIEW_STAMP_URL` and `REVIEW_STAMP_KEY` for the service. The trusted local URL must match the base config before the CLI sends the key. The CLI owns authentication; do not print or inspect the key. See [references/stamp.md](references/stamp.md) for setup, outputs and failure handling.
 
-The service independently checks the current whole-PR range, base-branch stamp policy and repository allowlist. It excludes the PR author and submits the approval as an opted-in GitHub reviewer, with the exact reviewed commit and Review Agent attribution. No Teams connection or local MCP is needed.
+The service independently checks the current whole-PR range, the published review, base-branch stamp policy and the app's installation. It then approves the exact reviewed commit as the Review Agent app.
 
-Report the returned approval URL and approving account. If refused or the request fails, report the reason and stop. An uncertain write is not automatically retried; inspect GitHub before another attempt. Never use a direct `gh pr review --approve` call to bypass this workflow.
+Report the returned approval URL and approving account. If refused, report the reason and stop. After an uncertain outcome, rerunning the same command is safe because the service detects an existing approval. Never use a direct `gh pr review --approve` call to bypass this workflow.

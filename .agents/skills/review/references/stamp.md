@@ -1,6 +1,6 @@
-# Direct GitHub stamping
+# Review Agent stamping
 
-The organization runs the shared Effect stamp service once with `review stamp serve`. Reviewers opt in with `review stamp enroll` and authorize GitHub's device code. Each developer configures the trusted endpoint as `REVIEW_STAMP_URL` and the approval key as `REVIEW_STAMP_KEY`; never put the key in review config, findings or conversation output. The base branch's endpoint must match the trusted local URL before the key can be sent.
+A stamp is a GitHub approval from the organization's Review Agent GitHub App, submitted by the shared approval service after your review. Each developer configures the trusted endpoint as `REVIEW_STAMP_URL` and the approval key as `REVIEW_STAMP_KEY`. Never put the key in review config, findings, review context or conversation output. The base branch's endpoint must match the trusted local URL before the key is sent.
 
 The base branch's `.review/config.json` configures:
 
@@ -15,20 +15,25 @@ The base branch's `.review/config.json` configures:
 }
 ```
 
-Use the original findings file and the same committed whole-PR range and config:
+A PR qualifies only when the review has zero accepted findings and an overall confidence of 4/5 or 5/5. Publish the review first. Its context must state the score once as `**Confidence: N/5**`. Then pass the original findings file, the same committed whole-PR range and config, and the same score:
 
 ```sh
 review stamp approve /tmp/findings.json --repo /path/to/repository \
   --pr https://github.com/ORG/REPO/pull/123 \
-  --base <resolved-merge-base> --head <reviewed-head> --dry-run
+  --base <resolved-merge-base> --head <reviewed-head> --confidence 4 --dry-run
 ```
 
-Omit `--dry-run` when the user has asked for the stamp. Local-only review authorization does not authorize an approval.
+Omit `--dry-run` to submit the stamp. Do not stamp a review below 4/5; report it and request human review.
 
-Success returns `action` (`approved` or `already-approved`), `pr`, `head`, `approvedBy` and `reviewUrl`. A preview returns `action: dry-run`, the authorized service URL and the request; it does not need a service key or enroll a reviewer.
+Success returns `action` (`approved` or `already-approved`), `pr`, `head`, `approvedBy` (the app's bot account) and `reviewUrl`. A preview returns `action: dry-run`, the authorized service URL and the request; it does not need a service key.
 
-Exit 2 means a refusal, input/configuration error, or failed service call. Report the error without retrying automatically. A timeout may follow a successful GitHub write. Inspect the PR's reviews at the returned/reviewed head; the service retains a pending reservation for an administrator to reconcile. A dismissed approval is not silently reapproved.
+Exit 2 means a refusal, an input or configuration error, or a failed service call.
 
-The service needs an eligible reviewer other than the PR author, access to the repository, and a repository entry in its administrator-managed allowlist. HTTP 401 means the key is missing, wrong or not authorized for that operation. HTTP 409 is a refused stamp. After any failed approval request, inspect GitHub before retrying because a write may have succeeded. Do not bypass a refusal with another approval route.
+- `publish_required`: the CLI could not find exactly one review comment from your account for the current range, with zero accepted findings and one confidence score. Publish the current review, then retry.
+- `stamp_refused` or another service code: report the reason and request human review.
+- HTTP 401: the key is missing, wrong or rotated.
+- Uncertain outcome: an approval may have landed. Rerunning the same command is safe, because the service returns `already-approved` when the bot already approved that commit. It does not approve again after a dismissal.
 
-Service deployment and CLI enrollment are documented in the review project's `stamp-service/README.md`. Enrollment uses `REVIEW_STAMP_ENROLL_KEY`; `review stamp users` and `review stamp remove USERNAME` use `REVIEW_STAMP_ADMIN_KEY`. These keys are separate from the approval key. Do not enroll an account or administer the pool as part of a PR review unless the user requests it.
+Do not bypass a refusal with another approval route.
+
+The service needs the app installed on the repository, base-branch authorization, and a current, clean, published whole-PR review. Branch rules decide whether the approval satisfies merge requirements. Code-owner reviews and other remaining requirements are handled by people. Deployment is documented in the review project's `stamp-service/README.md`.

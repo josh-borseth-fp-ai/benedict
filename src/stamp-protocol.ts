@@ -1,4 +1,5 @@
 import { Data, Schema } from "effect"
+import { commentMarker } from "./publish.js"
 
 export class StampError extends Data.TaggedError("StampError")<{
   readonly code: string
@@ -10,11 +11,15 @@ export const stampError = (code: string, message: string, status = 409) => new S
 export const protectedPaths = [".review/**", ".agents/skills/review/**", "stamp-service/**", "src/stamp*.ts"]
 export const Sha = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
+/** Approval requires an overall review confidence of at least 4/5. */
+export const minimumConfidence = 4
 export const StampReport = Schema.Struct({
-  version: Schema.Literal(1), pr: Schema.String, base: Sha, head: Sha,
+  version: Schema.Literal(2), pr: Schema.String, base: Sha, head: Sha,
   findings: Schema.Array(Schema.Unknown),
   dropped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  skills: Schema.Array(Schema.Literals(["correctness", "security"]))
+  skills: Schema.Array(Schema.Literals(["correctness", "security"])),
+  confidence: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
+  reviewComment: Schema.String
 })
 export type StampReport = typeof StampReport.Type
 export const StampResult = Schema.Struct({
@@ -22,18 +27,6 @@ export const StampResult = Schema.Struct({
   head: Sha, approvedBy: Schema.String, reviewUrl: Schema.String
 })
 export type StampResult = typeof StampResult.Type
-export const EnrollmentStart = Schema.Struct({
-  enrollment: Schema.String, userCode: Schema.String,
-  verificationUri: Schema.Literal("https://github.com/login/device"),
-  expiresIn: PositiveInt, interval: PositiveInt
-})
-export const EnrollmentPoll = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("pending"), interval: PositiveInt }),
-  Schema.Struct({ status: Schema.Literal("enrolled"), username: Schema.String })
-])
-export type EnrollmentPoll = typeof EnrollmentPoll.Type
-export const ReviewerList = Schema.Struct({ users: Schema.Array(Schema.Struct({ username: Schema.String, id: PositiveInt })) })
-export const RemovedReviewer = Schema.Struct({ removed: Schema.String })
 
 export const serviceUrl = (value: string): string => {
   const url = new URL(value)
@@ -43,10 +36,13 @@ export const serviceUrl = (value: string): string => {
   return url.href
 }
 
-/** The configured stamp endpoint fixes all management routes to the same trusted origin. */
-export const managementUrl = (trusted: string, suffix: string): string => {
-  const url = new URL(serviceUrl(trusted))
-  if (!url.pathname.endsWith("/api/stamp")) throw new Error("REVIEW_STAMP_URL must end with /api/stamp.")
-  url.pathname = url.pathname.slice(0, -"stamp".length) + suffix
-  return url.href
+/**
+ * Reads the overall confidence from a published review comment for exactly this range with no
+ * accepted findings. Returns undefined when the comment does not record one unambiguous score.
+ */
+export const publishedConfidence = (body: string, base: string, head: string): number | undefined => {
+  if (!body.startsWith(`${commentMarker}\n`)) return undefined
+  if (!body.includes(`Reviewed commits: \`${base}\` → \`${head}\`.`) || !body.includes("Accepted findings: **0**.")) return undefined
+  const scores = new Set([...body.matchAll(/^\s*(?:\*\*)?Confidence:\s*([1-5])\/5\b/gm)].map(match => Number(match[1])))
+  return scores.size === 1 ? [...scores][0] : undefined
 }

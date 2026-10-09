@@ -26,7 +26,6 @@
     "node": ">=22.20.0"
   },
   "dependencies": {
-    "@azure/data-tables": "13.3.2",
     "@effect/platform-node": "4.0.2",
     "effect": "4.0.2",
     "picomatch": "4.0.7",
