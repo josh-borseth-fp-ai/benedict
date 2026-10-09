@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { ConfigFile, OrganizationManifest } from "./model.js"
 
 /** Editor schemas for the committed JSON files; the Effect decoders remain authoritative. */
-export const schemaBaseUrl = "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas"
+export const schemaBaseUrl = "https://raw.githubusercontent.com/josh-borseth-fp-ai/benedict/main/schemas"
 
 const document = (name: string, title: string, schema: typeof ConfigFile | typeof OrganizationManifest) => {
   const { schema: root, definitions } = Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" })

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/josh-borseth-fp-ai/benedict/main/schemas/config.schema.json",
   "title": "Benedict repository config (.benedict/config.json)",
   "type": "object",
   "properties": {

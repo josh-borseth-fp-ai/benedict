@@ -142,7 +142,7 @@ A `.benedict/config.json` in the reviewed repository chooses which lenses apply 
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas/config.schema.json",
+  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/benedict/main/schemas/config.schema.json",
   "skills": ["correctness", "security"],
   "minimumSeverity": "medium",
   "minimumConfidence": 0.7,
@@ -175,7 +175,7 @@ The organization repository has a `.benedict/organization.json` manifest:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/review/main/schemas/organization.schema.json",
+  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/benedict/main/schemas/organization.schema.json",
   "defaults": { "skills": ["correctness", "security"], "minimumConfidence": 0.8 },
   "required": {
     "skills": ["security"],
