@@ -1,9 +1,9 @@
 ---
-name: review
+name: benedict
 description: Review a Git diff for real correctness and security defects, assess merge confidence, and publish AI-labeled findings, architecture diagrams, and UI evidence for GitHub PRs. Use when asked to review a change, commit, branch, pull request, or worktree, or to review and stamp a PR.
 ---
 
-# Review
+# Benedict
 
 You are the reviewer. This session is already the agent, so do not launch another one. Do not edit the repository.
 
@@ -11,13 +11,13 @@ You are the reviewer. This session is already the agent, so do not launch anothe
 
 Default base is `HEAD~1` and head is `HEAD`. Use the range the user names. For a worktree review, use `--worktree` with base `HEAD` unless the user names another base; this includes staged, unstaged, and untracked files.
 
-For a GitHub PR, run `review context --pr <PR URL>`. It resolves the PR's merge base and current head with `gh`, fetches missing commits, and reviews that whole range unless the user selects a narrower `--base`. Read the PR workflow in [references/cli.md](references/cli.md). Keep the returned `range.base` and `range.head` hashes for checking, publishing and stamping.
+For a GitHub PR, run `benedict context --pr <PR URL>`. It resolves the PR's merge base and current head with `gh`, fetches missing commits, and reviews that whole range unless the user selects a narrower `--base`. Read the PR workflow in [references/cli.md](references/cli.md). Keep the returned `range.base` and `range.head` hashes for checking, publishing and stamping.
 
 ## Gather
 
-Run `review context --repo <repository>` with the selected range. Read [references/cli.md](references/cli.md) for flags and the finding JSON format. Use the returned patches and permitted lenses, and read source from the selected Git head for a commit review. Read each changed code file and related callers, callees, and tests when the diff is not enough to judge the change. Read `AGENTS.md`, `CLAUDE.md`, and `CODEOWNERS` when they exist. Skip binary files, deleted source, symlinks, and submodules.
+Run `benedict context --repo <repository>` with the selected range. Read [references/cli.md](references/cli.md) for flags and the finding JSON format. Use the returned patches and permitted lenses, and read source from the selected Git head for a commit review. Read each changed code file and related callers, callees, and tests when the diff is not enough to judge the change. Read `AGENTS.md`, `CLAUDE.md`, and `CODEOWNERS` when they exist. Skip binary files, deleted source, symlinks, and submodules.
 
-The CLI reads `.review/config.json` from the repository. Review configuration is JSON only. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables optional checks; organization-required lenses still apply. Fix input or configuration errors before relying on a check result.
+The CLI reads `.benedict/config.json` from the repository. Review configuration is JSON only. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables optional checks; organization-required lenses still apply. Fix input or configuration errors before relying on a check result.
 
 Read the `config.knowledge` documents returned by context. They identify repository and organization scope. Organization defaults can be overridden by repository settings; organization-required lenses, thresholds, and rules remain applicable. Include the organization revision in the report when present. See [references/knowledge.md](references/knowledge.md) when knowledge or policy resolution fails. A missing required lock/cache prevents validated review; do not silently omit organization guidance or use a different revision.
 
@@ -71,7 +71,7 @@ Write **Confidence: N/5**, where N is an integer from 1 to 5 expressing confiden
 | 4/5 | Likely safe to merge; remaining concerns or verification gaps are minor. |
 | 5/5 | Strong supporting evidence: relevant paths were reviewed, appropriate verification is complete, and no substantive concerns remain. |
 
-Choose the score after checking findings. An empty finding list or a passing `review check` does not automatically earn 5/5. Do not turn rejected drafts or guesses into claims in the rationale. This overall score is separate from each finding's 0–1 confidence and the configured `minimumConfidence`; those continue to measure confidence in the individual defect.
+Choose the score after checking findings. An empty finding list or a passing `benedict check` does not automatically earn 5/5. Do not turn rejected drafts or guesses into claims in the rationale. This overall score is separate from each finding's 0–1 confidence and the configured `minimumConfidence`; those continue to measure confidence in the individual defect.
 
 ## PR architecture diagram
 
@@ -83,7 +83,7 @@ Prefer a simple `flowchart` or `sequenceDiagram` with quoted labels that GitHub 
 
 ## Check
 
-Write drafts to a JSON file outside the reviewed tree, then run `review check <findings.json>` using the resolved commit hashes returned by `context`, or the same base and `--worktree`. Report only the `accepted` findings and count rejected drafts. Exit code 1 means the report contains rejected drafts and is still usable; exit code 2 means validation failed. Rejection reasons may guide a correction, but keep thresholds and evidence requirements intact. A passing check establishes structural validity and source evidence; you must still verify the defect.
+Write drafts to a JSON file outside the reviewed tree, then run `benedict check <findings.json>` using the resolved commit hashes returned by `context`, or the same base and `--worktree`. Report only the `accepted` findings and count rejected drafts. Exit code 1 means the report contains rejected drafts and is still usable; exit code 2 means validation failed. Rejection reasons may guide a correction, but keep thresholds and evidence requirements intact. A passing check establishes structural validity and source evidence; you must still verify the defect.
 
 If the CLI is unavailable, gather the range with Git and apply the checks below manually. State that deterministic validation was not run. When the repository declares organization knowledge, also disclose any unavailable organization guidance.
 
@@ -102,20 +102,20 @@ Omit anything you are guessing about. An empty result is a valid review.
 
 ## GitHub
 
-For a GitHub PR review, publish accepted findings and useful review context with `review publish`, unless the user asks for a local-only review. Use the explicit PR URL and the same resolved base, head, and config used for investigation. For a local diff, publish only when the user supplies a PR destination. Publishing requires a committed review of the current PR head.
+For a GitHub PR review, publish accepted findings and useful review context with `benedict publish`, unless the user asks for a local-only review. Use the explicit PR URL and the same resolved base, head, and config used for investigation. For a local diff, publish only when the user supplies a PR destination. Publishing requires a committed review of the current PR head.
 
-The CLI revalidates drafts, labels the comment as AI-generated by the review skill and CLI, and updates its own marked comment through `gh`. Keep those mechanics in the CLI. For every PR review, write the overall confidence score, its rationale, and the fenced Mermaid architecture diagram to a temporary Markdown file outside the reviewed tree and pass `--context-file`. For UI changes, include GitHub-hosted media URLs or links to the PR evidence, what was demonstrated, the captured head, and any capture/upload gaps. Upload media separately using the [UI evidence workflow](references/ui-evidence.md); `review publish` preserves Markdown links but does not upload local files. Include useful context such as verified behavior, checks run, and concrete coverage limits. Keep the score, diagram, and UI evidence in Markdown rather than adding fields to finding JSON. Share relevant summaries; omit secrets, raw logs, and unrelated conversation. Include both the score and diagram even when no findings survive.
+The CLI revalidates drafts, labels the comment as AI-generated by Benedict, and updates its own marked comment through `gh`. Keep those mechanics in the CLI. For every PR review, write the overall confidence score, its rationale, and the fenced Mermaid architecture diagram to a temporary Markdown file outside the reviewed tree and pass `--context-file`. For UI changes, include GitHub-hosted media URLs or links to the PR evidence, what was demonstrated, the captured head, and any capture/upload gaps. Upload media separately using the [UI evidence workflow](references/ui-evidence.md); `benedict publish` preserves Markdown links but does not upload local files. Include useful context such as verified behavior, checks run, and concrete coverage limits. Keep the score, diagram, and UI evidence in Markdown rather than adding fields to finding JSON. Share relevant summaries; omit secrets, raw logs, and unrelated conversation. Include both the score and diagram even when no findings survive.
 
 Use `--dry-run --format text` when you need to inspect the exact comment. Report the returned comment URL after success. On a stale PR, review the new range before publishing. On a GitHub write error, inspect the PR before retrying because the write may have succeeded. If publishing fails or the CLI is unavailable, deliver the local review and clearly state that GitHub publication did not complete.
 
 ## Stamp
 
-Stamp when the user asks you to review and stamp a GitHub PR, or when the repository's agent instructions (for example `AGENTS.md`) require a review and stamp for its PRs. A stamp directly submits a GitHub approval from the organization's Review Agent GitHub App. It is outward-facing and carries AI attribution.
+Stamp when the user asks you to review and stamp a GitHub PR, or when the repository's agent instructions (for example `AGENTS.md`) require a review and stamp for its PRs. A stamp directly submits a GitHub approval from the organization's Benedict GitHub App. It is outward-facing and carries AI attribution.
 
 Review the whole current PR from its merge base through its head. Publish the review as above, with `**Confidence: N/5**` stated once in the context file. If there are no accepted findings and the score is 4 or 5, run:
 
 ```sh
-review stamp approve /tmp/findings.json --repo /path/to/repository \
+benedict stamp approve /tmp/findings.json --repo /path/to/repository \
   --pr https://github.com/ORG/REPO/pull/123 \
   --base <resolved-merge-base> --head <reviewed-head> --confidence N
 ```
@@ -124,8 +124,8 @@ Pass the original draft findings, the same resolved hashes and config used by `c
 
 Choose the score before deciding whether to stamp. Never raise it to qualify. With accepted findings or a score below 4, do not stamp; report the review and request human review.
 
-The base branch must configure `stamp.enabled` and `stamp.service`, and the user must have configured `REVIEW_STAMP_URL` and `REVIEW_STAMP_KEY` for the service. The trusted local URL must match the base config before the CLI sends the key. The CLI owns authentication; do not print or inspect the key. See [references/stamp.md](references/stamp.md) for setup, outputs and failure handling.
+The base branch must configure `stamp.enabled` and `stamp.service`, and the user must have configured `BENEDICT_STAMP_URL` and `BENEDICT_STAMP_KEY` for the service. The trusted local URL must match the base config before the CLI sends the key. The CLI owns authentication; do not print or inspect the key. See [references/stamp.md](references/stamp.md) for setup, outputs and failure handling.
 
-The service independently checks the current whole-PR range, the published review, base-branch stamp policy and the app's installation. It then approves the exact reviewed commit as the Review Agent app.
+The service independently checks the current whole-PR range, the published review, base-branch stamp policy and the app's installation. It then approves the exact reviewed commit as the Benedict app.
 
 Report the returned approval URL and approving account. If refused, report the reason and stop. After an uncertain outcome, rerunning the same command is safe because the service detects an existing approval. Never use a direct `gh pr review --approve` call to bypass this workflow.

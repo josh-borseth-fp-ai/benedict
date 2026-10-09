@@ -24,8 +24,8 @@ const args = process.argv.slice(2);
 const method = args[args.indexOf('--method') + 1];
 const endpoint = args[args.indexOf('--header') + 2];
 const body = args.includes('--input') ? JSON.parse(fs.readFileSync(0, 'utf8')) : null;
-fs.appendFileSync(process.env.REVIEW_GH_LOG, JSON.stringify({method,endpoint,body,args})+'\\n');
-const state = JSON.parse(fs.readFileSync(process.env.REVIEW_GH_STATE, 'utf8'));
+fs.appendFileSync(process.env.BENEDICT_GH_LOG, JSON.stringify({method,endpoint,body,args})+'\\n');
+const state = JSON.parse(fs.readFileSync(process.env.BENEDICT_GH_STATE, 'utf8'));
 let result;
 if (endpoint === 'user') result = {id: 7};
 else if (method === 'GET' && endpoint.includes('/pulls/')) {
@@ -43,7 +43,7 @@ else if (method === 'GET' && endpoint.includes('/pulls/')) {
   if (!result || result.user.id !== 7) throw new Error('Attempted to edit another author');
   result.body = body.body;
 } else throw new Error('Unexpected API request: ' + endpoint);
-fs.writeFileSync(process.env.REVIEW_GH_STATE, JSON.stringify(state));
+fs.writeFileSync(process.env.BENEDICT_GH_STATE, JSON.stringify(state));
 if (state.failMethod === method) { process.stderr.write('simulated connection failure'); process.exit(1); }
 process.stdout.write(state.invalidJson ? '{' : JSON.stringify(result));
 `
@@ -52,7 +52,7 @@ type FakeComment = { id: number; user: { id: number }; body: string; html_url: s
 const comment = (id: number, author: number, body: string): FakeComment => ({ id, user: { id: author }, body, html_url: `${prUrl}#issuecomment-${id}` })
 
 const fixture = (t: TestContext) => {
-  const root = mkdtempSync(join(tmpdir(), "review-publish-"))
+  const root = mkdtempSync(join(tmpdir(), "benedict-publish-"))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const repo = join(root, "repo")
   const bin = join(root, "bin")
@@ -91,7 +91,7 @@ const fixture = (t: TestContext) => {
   }
   const run = (...args: string[]) => spawnSync(process.execPath, [cli, "publish", input, "--pr", prUrl, ...args], {
     cwd: repo, encoding: "utf8", env: {
-      ...process.env, PATH: `${bin}:${process.env.PATH}`, REVIEW_GH_STATE: statePath, REVIEW_GH_LOG: logPath,
+      ...process.env, PATH: `${bin}:${process.env.PATH}`, BENEDICT_GH_STATE: statePath, BENEDICT_GH_LOG: logPath,
       GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GH_HOST: "wrong.example.invalid"
     }
   })
@@ -114,7 +114,7 @@ test("publication validates drafts, sends JSON stdin, labels AI and includes con
   assert.equal(result.range.base, f.base)
   assert.equal(result.range.head, f.head)
   assert.match(result.body, /AI-generated review/)
-  assert.match(result.body, /review skill and CLI automated reviewer/)
+  assert.match(result.body, /\*\*Benedict\*\*, the automated review skill and CLI/)
   assert.match(result.body, /does not indicate human authorship/)
   assert.ok(result.body.includes(explanation))
   assert.match(result.body, /Verified the caller/)
@@ -254,8 +254,8 @@ test("empty findings still publish a useful summary and optional context", (t) =
 
 test("publish uses repository policy and supports explicit reviewed commits and text preview", (t) => {
   const f = fixture(t)
-  mkdirSync(join(f.repo, ".review"), { recursive: true })
-  writeFileSync(join(f.repo, ".review/config.json"), JSON.stringify({ minimumConfidence: 0.95 }))
+  mkdirSync(join(f.repo, ".benedict"), { recursive: true })
+  writeFileSync(join(f.repo, ".benedict/config.json"), JSON.stringify({ minimumConfidence: 0.95 }))
   const result = f.success("--base", f.base, "--head", f.head)
   assert.deepEqual(result.summary, { accepted: 0, rejected: 1 })
   assert.ok(!result.body.includes(draft.title))

@@ -16,7 +16,7 @@ export const repositoryRoot = Effect.fn("Review.repositoryRoot")(function*(direc
 /** Fetching is explicit. This prepares a validated bundle without changing repo files. */
 export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root: string, decoded: ConfigFile, update: boolean) {
   if (!decoded.organization) {
-    return yield* new ReviewError({ code: "knowledge_error", message: `No organization configured. Add organization.source to ${configPath} or run review setup --organization <Git URL> inside the repository.` })
+    return yield* new ReviewError({ code: "knowledge_error", message: `No organization configured. Add organization.source to ${configPath} or run benedict setup --organization <Git URL> inside the repository.` })
   }
   const git = yield* Git
   const fs = yield* FileSystem.FileSystem
@@ -24,7 +24,7 @@ export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root
   const resolved = yield* resolveOrganization(root, decoded.organization)
   const existing = yield* readLock(root)
   if (existing && !update && (existing.source !== resolved.source || existing.ref !== resolved.ref)) {
-    return yield* new ReviewError({ code: "knowledge_unavailable", message: "Organization source/ref changed. Run review sync --update to review and record the new revision." })
+    return yield* new ReviewError({ code: "knowledge_unavailable", message: "Organization source/ref changed. Run benedict sync --update to review and record the new revision." })
   }
   // Validate local knowledge before fetching or writing a lock.
   yield* readRepositoryKnowledge(root, decoded.knowledge ?? [])
@@ -55,7 +55,7 @@ export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root
   } else {
     // Each sync owns a ref so concurrent repositories cannot race on FETCH_HEAD.
     revision = yield* Effect.scoped(Effect.gen(function*() {
-      const temporaryRef = `refs/review-sync/${randomUUID()}`
+      const temporaryRef = `refs/benedict-sync/${randomUUID()}`
       yield* Effect.addFinalizer(() => git.run(cache, ["update-ref", "-d", temporaryRef]).pipe(Effect.catch(() => Effect.succeed(""))))
       yield* git.run(cache, ["-c", "protocol.ext.allow=never", "fetch", "--no-tags", "--no-write-fetch-head", "--", resolved.source, `${resolved.ref}:${temporaryRef}`])
       return (yield* git.run(cache, ["rev-parse", "--verify", `${temporaryRef}^{commit}`])).trim()

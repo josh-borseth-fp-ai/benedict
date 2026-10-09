@@ -27,10 +27,10 @@ export const Finding = Schema.Struct({
 })
 export type Finding = typeof Finding.Type
 
-/** Repository paths owned by the review CLI. Every scope keeps its JSON state under `.review/`. */
-export const configPath = ".review/config.json"
-export const organizationManifestPath = ".review/organization.json"
-export const lockPath = ".review/knowledge.lock.json"
+/** Repository paths owned by the Benedict CLI. Every scope keeps its JSON state under `.benedict/`. */
+export const configPath = ".benedict/config.json"
+export const organizationManifestPath = ".benedict/organization.json"
+export const lockPath = ".benedict/knowledge.lock.json"
 const SchemaReference = { $schema: Schema.optionalKey(NonBlank) }
 
 export const RequiredPolicy = Schema.Struct({

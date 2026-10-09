@@ -95,16 +95,16 @@ export const approveStamp = Effect.fn("Stamp.approve")(function*(value: unknown,
   const ours = (yield* pages(token, `${endpoint}/reviews`, Review)).filter(review => review.user?.login === login && review.commit_id === report.head)
   const approved = ours.find(review => review.state === "APPROVED")
   if (approved) return { action: "already-approved", pr: target.url, head: report.head, approvedBy: login, reviewUrl: approved.html_url } satisfies StampResult
-  if (ours.some(review => review.state === "DISMISSED")) return yield* stampError("stamp_dismissed", "The Review Agent approval for this commit was dismissed; a person must approve it.")
+  if (ours.some(review => review.state === "DISMISSED")) return yield* stampError("stamp_dismissed", "The Benedict approval for this commit was dismissed; a person must approve it.")
   const current = yield* decode(Pr, yield* gh.request(token, "GET", endpoint))
   if (signature(current) !== signature(pr)) return yield* stampError("stale_review", "The PR changed before approval; review its current range.")
   const body = [
-    "🤖 **Review Agent — automated approval**",
+    "🤖 **Benedict — automated approval**",
     `Reviewed \`${report.base}\` → \`${report.head}\`.`,
     `Accepted findings: 0 · drafts dropped: ${report.dropped} · overall confidence: ${report.confidence}/5.`,
     `Review: ${report.reviewComment}`,
-    "A developer's local AI review agent reviewed this PR; the Review Agent GitHub App submitted this approval. Branch rules decide whether it satisfies merge requirements.",
-    `<!-- review-agent-stamp:${report.head} -->`
+    "A developer's local AI review agent reviewed this PR; the Benedict GitHub App submitted this approval. Branch rules decide whether it satisfies merge requirements.",
+    `<!-- benedict-stamp:${report.head} -->`
   ].join("\n\n")
   // Finish the write even if the HTTP caller disconnects.
   const review = yield* Effect.uninterruptible(gh.request(token, "POST", `${endpoint}/reviews`, { event: "APPROVE", commit_id: report.head, body }).pipe(Effect.flatMap(raw => decode(Review, raw))))

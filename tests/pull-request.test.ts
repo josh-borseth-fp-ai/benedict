@@ -17,13 +17,13 @@ const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev
 const fakeGh = `#!/usr/bin/env node
 import fs from 'node:fs';
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.REVIEW_GH_LOG, JSON.stringify(args)+'\\n');
-process.stdout.write(fs.readFileSync(process.env.REVIEW_GH_STATE, 'utf8'));
+fs.appendFileSync(process.env.BENEDICT_GH_LOG, JSON.stringify(args)+'\\n');
+process.stdout.write(fs.readFileSync(process.env.BENEDICT_GH_STATE, 'utf8'));
 `
 
 // upstream: main has base → mainline; the PR branches from base and adds a feature commit.
 const fixture = (t: TestContext) => {
-  const root = mkdtempSync(join(tmpdir(), "review-pr-"))
+  const root = mkdtempSync(join(tmpdir(), "benedict-pr-"))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", env }).trim()
   const work = join(root, "work")
@@ -60,7 +60,7 @@ const fixture = (t: TestContext) => {
   const calls = () => existsSync(logPath) ? readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]) : []
   const run = (...args: string[]) => spawnSync(process.execPath, [cli, "context", ...args], {
     cwd: repo, encoding: "utf8",
-    env: { ...env, PATH: `${bin}:${process.env.PATH}`, REVIEW_GH_STATE: statePath, REVIEW_GH_LOG: logPath }
+    env: { ...env, PATH: `${bin}:${process.env.PATH}`, BENEDICT_GH_STATE: statePath, BENEDICT_GH_LOG: logPath }
   })
   const context = (...args: string[]) => {
     const result = run(...args)

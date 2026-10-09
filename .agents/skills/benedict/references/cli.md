@@ -1,19 +1,19 @@
 # CLI and finding format
 
-Use the installed `review` executable. Run `review --help` or `review <command> --help` for command usage.
+Use the installed `benedict` executable. Run `benedict --help` or `benedict <command> --help` for command usage.
 
 ## Context
 
 ```sh
-review context --repo /path/to/project --base HEAD~1 --head HEAD
-review context --repo /path/to/project --worktree
+benedict context --repo /path/to/project --base HEAD~1 --head HEAD
+benedict context --repo /path/to/project --worktree
 ```
 
 JSON is the default output. `--format text` produces a readable summary. Both commands accept `--repo`, `--base`, `--head`, `--worktree`, `--config`, and `--format`. `--worktree` and `--head` cannot be combined. `context` also accepts `--pr` for a GitHub PR; see the [GitHub PR workflow](#github-pr-workflow).
 
 The default commit range is `HEAD~1` to `HEAD`; the default worktree base is `HEAD`. The context contains resolved commit hashes, changed files, patches, line counts, changed lines, permitted correctness/security lenses, and repository rules. Commit source comes from Git. Worktree source is the current on-disk content, including staged, unstaged, and untracked files that Git does not ignore.
 
-Config and repository knowledge are read from the current working tree. Organization knowledge is read from the exact cached revision in `.review/knowledge.lock.json`. Context returns resolved policy and knowledge documents, including their scope. Path globs match repository-relative paths using forward slashes. Matching rules combine their permitted lenses, intersected with the global `skills` list; unmatched paths use that global list. Organization-required lenses always apply; an empty list disables only optional lenses. Config defaults to `.review/config.json`; `--config` selects another JSON file relative to the repository root, or accepts an absolute path.
+Config and repository knowledge are read from the current working tree. Organization knowledge is read from the exact cached revision in `.benedict/knowledge.lock.json`. Context returns resolved policy and knowledge documents, including their scope. Path globs match repository-relative paths using forward slashes. Matching rules combine their permitted lenses, intersected with the global `skills` list; unmatched paths use that global list. Organization-required lenses always apply; an empty list disables only optional lenses. Config defaults to `.benedict/config.json`; `--config` selects another JSON file relative to the repository root, or accepts an absolute path.
 
 ## Draft findings
 
@@ -43,8 +43,8 @@ Use the exact repository-relative file path reported by `context`. Lines are pos
 ## Check and report
 
 ```sh
-review check /tmp/findings.json --repo /path/to/project --base <resolved-base-hash> --head <resolved-head-hash>
-review check /tmp/findings.json --repo /path/to/project --base <resolved-base-hash> --worktree
+benedict check /tmp/findings.json --repo /path/to/project --base <resolved-base-hash> --head <resolved-head-hash>
+benedict check /tmp/findings.json --repo /path/to/project --base <resolved-base-hash> --worktree
 ```
 
 Use the same policy and Git range as `context`. Commit hashes prevent branch movement from changing the reviewed source. For a worktree review, source is read again on each command invocation; repeat the investigation if files change.
@@ -66,7 +66,7 @@ When organization knowledge is configured, include the source and organization r
 Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with access to the destination PR. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL:
 
 ```sh
-review context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/NUMBER
+benedict context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/NUMBER
 ```
 
 `--pr` reads the PR's current base and head with `gh`, reviews their merge base through the PR head, and reports the resolved hashes in `range` and the PR in `pullRequest.url`. The diff and source still come from local Git. If either commit is missing locally, the CLI fetches the PR head and base branch from the remote whose URL points to `github.com/OWNER/REPO`, without moving local branches or changing files. With no matching remote, add one or fetch the commits yourself. `--pr` cannot be combined with `--head` or `--worktree`. A user-selected narrower range may pass `--base` with an ancestor of the PR head inside the PR range.
@@ -74,13 +74,13 @@ review context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/N
 Investigate that resolved range, then pass the returned `range.base` and `range.head` hashes to `check` and `publish`. Do not pass `--pr` to `check`: the PR head may move during the review, and the fixed hashes keep the reviewed source unchanged.
 
 ```sh
-review publish /tmp/findings.json --repo /path/to/project \
+benedict publish /tmp/findings.json --repo /path/to/project \
   --pr https://github.com/OWNER/REPO/pull/NUMBER \
   --base <reviewed-base-hash> --head <reviewed-head-hash> \
   --context-file /tmp/review-context.md --dry-run --format text
 
 # Omit --dry-run to write the review to GitHub.
-review publish /tmp/findings.json --repo /path/to/project \
+benedict publish /tmp/findings.json --repo /path/to/project \
   --pr https://github.com/OWNER/REPO/pull/NUMBER \
   --base <reviewed-base-hash> --head <reviewed-head-hash> \
   --context-file /tmp/review-context.md
@@ -92,7 +92,7 @@ Files resolve from the shell's current directory. Config uses the same `--config
 
 For meaningful UI changes, follow [UI evidence guidance](ui-evidence.md): check existing screenshots and focused video, request missing evidence from the implementation agent, and include the uploaded media URLs or evidence-comment link, demonstrated scenario, captured head, and any gaps in the context file. `publish` preserves Markdown links; it does not capture or upload media, and a local filesystem path will not become a GitHub attachment. Local-only reviews do not upload or publish evidence.
 
-Every comment starts with **AI-generated review** and identifies the review skill and CLI automated reviewer. GitHub still displays the signed-in account as the uploader. The comment includes resolved commits, accepted findings, severity, lens, confidence, source links, evidence, suggested fixes when present, and optional context. Rejected draft contents and local repository paths stay out of the comment.
+Every comment starts with **AI-generated review** and identifies **Benedict**, the automated review skill and CLI. GitHub still displays the signed-in account as the uploader. The comment includes resolved commits, accepted findings, severity, lens, confidence, source links, evidence, suggested fixes when present, and optional context. Rejected draft contents and local repository paths stay out of the comment.
 
 One PR conversation comment is maintained per signed-in account. The CLI paginates comments and updates only a comment by that account starting with its automation marker. Unchanged content makes no write; multiple matching comments cause an error. PR metadata is rechecked before writing. Concurrent publishers can still race; run publishing sequentially for an account and PR. GitHub does not make the final metadata check and comment write atomic, so the comment always identifies the reviewed commit.
 

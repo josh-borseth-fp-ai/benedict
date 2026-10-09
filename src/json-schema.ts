@@ -16,6 +16,6 @@ const document = (name: string, title: string, schema: typeof ConfigFile | typeo
 }
 
 export const jsonSchemas = {
-  "config.schema.json": document("config.schema.json", "Review repository config (.review/config.json)", ConfigFile),
-  "organization.schema.json": document("organization.schema.json", "Review organization manifest (.review/organization.json)", OrganizationManifest)
+  "config.schema.json": document("config.schema.json", "Benedict repository config (.benedict/config.json)", ConfigFile),
+  "organization.schema.json": document("organization.schema.json", "Benedict organization manifest (.benedict/organization.json)", OrganizationManifest)
 }

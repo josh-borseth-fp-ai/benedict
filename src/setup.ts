@@ -21,12 +21,12 @@ export interface SetupOptions {
   readonly skipSkills: boolean
 }
 
-const bundledSkill = fileURLToPath(new URL("../.agents/skills/review", import.meta.url))
+const bundledSkill = fileURLToPath(new URL("../.agents/skills/benedict", import.meta.url))
 const installer = fileURLToPath(new URL("./bin/cli.mjs", pathToFileURL(createRequire(import.meta.url).resolve("skills/package.json"))))
 
 export const installSkill = Effect.fn("Setup.installSkill")(function*(cwd: string, options: SetupOptions) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const args = [installer, "add", bundledSkill, "--skill", "review",
+  const args = [installer, "add", bundledSkill, "--skill", "benedict",
     ...(options.project ? [] : ["--global"]),
     ...options.agents.flatMap((agent) => ["--agent", agent]),
     ...(options.yes ? ["--yes", "--json"] : [])]
@@ -49,7 +49,7 @@ export const installSkill = Effect.fn("Setup.installSkill")(function*(cwd: strin
     try: () => {
       const entries: unknown = JSON.parse(result.stdout)
       return Array.isArray(entries) && entries.length > 0 && entries.every((entry) =>
-        entry.name === "review" && entry.status === "installed" && Array.isArray(entry.agents) && entry.agents.length > 0)
+        entry.name === "benedict" && entry.status === "installed" && Array.isArray(entry.agents) && entry.agents.length > 0)
     },
     catch: () => new ReviewError({ code: "setup_error", message: "The skill installer returned an invalid result. Organization configuration was not changed." })
   }) : !/Installation cancelled|Failed to install/.test(stripVTControlCharacters(result.stdout))
@@ -71,7 +71,7 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
     return yield* new ReviewError({ code: "setup_error", message: "For non-interactive setup, select agents with --agent <name> (repeat as needed, or use --agent '*')." })
   }
   if (options.ref !== undefined && options.organization === undefined) {
-    return yield* new ReviewError({ code: "setup_error", message: `--ref requires --organization. Edit an existing organization ref in ${configPath} and run review sync --update.` })
+    return yield* new ReviewError({ code: "setup_error", message: `--ref requires --organization. Edit an existing organization ref in ${configPath} and run benedict sync --update.` })
   }
   const path = yield* Path.Path
   const location = yield* repositoryRoot(options.repo).pipe(Effect.result)
@@ -90,7 +90,7 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
       if (local.decoded.organization) {
         const current = yield* resolveOrganization(root, local.decoded.organization)
         if (current.source !== resolved.source || current.ref !== resolved.ref) {
-          return yield* new ReviewError({ code: "setup_error", message: "This repository already selects another organization source/ref. Edit its config and run review sync --update for an explicit change." })
+          return yield* new ReviewError({ code: "setup_error", message: "This repository already selects another organization source/ref. Edit its config and run benedict sync --update for an explicit change." })
         }
       } else {
         decoded = { ...decoded, organization: requested }

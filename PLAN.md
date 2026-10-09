@@ -1,32 +1,32 @@
 # Plan
 
-Build a portable review skill backed by a deterministic Effect TypeScript CLI. Any coding agent can follow the skill and run the commands.
+Build Benedict, a portable review skill backed by a deterministic Effect TypeScript CLI. Any coding agent can follow the skill and run the commands.
 
 ## Responsibilities
 
 The skill guides investigation: read the change, trace related code, apply correctness and security, and establish whether a suspected defect is real. It also assesses merge confidence on a five-point scale and diagrams the affected architecture for each PR. Individual finding confidence remains on the 0–1 scale.
 
-`review context` resolves a Git range and returns changed files, patches, line counts, changed lines, applicable lenses, and repository rules. Commit reviews use source from Git; worktree reviews include staged, unstaged, and untracked files.
+`benedict context` resolves a Git range and returns changed files, patches, line counts, changed lines, applicable lenses, and repository rules. Commit reviews use source from Git; worktree reviews include staged, unstaged, and untracked files.
 
-`review check` validates finding structure, diff membership, file type, source line ranges, quoted evidence, permitted lenses, severity and confidence thresholds, and duplicate findings. It returns accepted findings and rejected drafts with reasons.
+`benedict check` validates finding structure, diff membership, file type, source line ranges, quoted evidence, permitted lenses, severity and confidence thresholds, and duplicate findings. It returns accepted findings and rejected drafts with reasons.
 
-`review setup` installs the bundled skill through Vercel's skills CLI, optionally connects a repository to organization knowledge, and records its initial revision. `review sync` restores that locked revision into a local cache; `--update` explicitly adopts a newer version.
+`benedict setup` installs the bundled skill through Vercel's skills CLI, optionally connects a repository to organization knowledge, and records its initial revision. `benedict sync` restores that locked revision into a local cache; `--update` explicitly adopts a newer version.
 
-Repository policy (`.review/config.json`) and Markdown knowledge live alongside the code. Organization defaults, required constraints, and shared documents live in an organization-owned Git repository's `.review/organization.json`, using the same policy field names. `.review/knowledge.lock.json` records the selected source and commit. Review commands use that exact cache offline and include its revision in their output.
+Repository policy (`.benedict/config.json`) and Markdown knowledge live alongside the code. Organization defaults, required constraints, and shared documents live in an organization-owned Git repository's `.benedict/organization.json`, using the same policy field names. `.benedict/knowledge.lock.json` records the selected source and commit. Review commands use that exact cache offline and include its revision in their output.
 
-`review publish` reuses that validator, renders a fixed AI attribution, verifies the PR range, and creates or updates an owned automation comment through GitHub CLI. The skill selects useful findings and context; deterministic code owns formatting, destination checks, and API operations.
+`benedict publish` reuses that validator, renders a fixed AI attribution, verifies the PR range, and creates or updates an owned automation comment through GitHub CLI. The skill selects useful findings and context; deterministic code owns formatting, destination checks, and API operations.
 
 ## Pipeline
 
 ```
 Coding agent loads the skill
-  → review context
+  → benedict context
   → investigate changed and related code
   → write draft findings
-  → review check
+  → benedict check
   → report accepted findings, dropped draft count, and overall confidence out of five
   → for a PR, diagram its changed architecture and write score, rationale, and Mermaid to Markdown context
-  → review publish for GitHub PR reviews, unless local-only
+  → benedict publish for GitHub PR reviews, unless local-only
 ```
 
 ## Boundaries
@@ -56,15 +56,15 @@ The developer's local coding agent reviews every PR, and a small approval servic
 
 ```
 Local agent follows the repository's AGENTS.md
-  → review context, investigate, review check, review publish (unchanged)
-  → review stamp approve --confidence N
+  → benedict context, investigate, benedict check, benedict publish (unchanged)
+  → benedict stamp approve --confidence N
       local gates: zero accepted findings, confidence ≥ 4, whole current PR,
       base-branch stamp config, protected paths, size limit
-  → POST REVIEW_STAMP_URL with x-review-key
+  → POST BENEDICT_STAMP_URL with x-benedict-key
   → approval service
       authenticates the key, mints an installation token for the one repository,
       repeats the gates against GitHub, checks for an existing bot approval
-  → POST /pulls/N/reviews as review-agent[bot]: APPROVE at the reviewed head
+  → POST /pulls/N/reviews as benedict[bot]: APPROVE at the reviewed head
 ```
 
 The service trusts the caller's review. It does not run a model; the local agent owns investigation and judgment. An approval means a key holder's agent reviewed the whole current PR and reported no blocking defects, under rules fixed by the base branch.
@@ -73,24 +73,24 @@ The service trusts the caller's review. It does not run a model; the local agent
 
 Both are required:
 
-- **Zero accepted findings.** `review check` removes drafts outside the diff, without matching evidence, below `severity.minimum` (default medium), below `minimumConfidence` (default 0.7), in a lens not permitted for the path, or duplicated. Anything left is a substantiated defect and blocks approval. Rejected drafts do not block.
+- **Zero accepted findings.** `benedict check` removes drafts outside the diff, without matching evidence, below `severity.minimum` (default medium), below `minimumConfidence` (default 0.7), in a lens not permitted for the path, or duplicated. Anything left is a substantiated defect and blocks approval. Rejected drafts do not block.
 - **Overall confidence of 4/5 or 5/5.** Zero findings only shows the agent reported nothing. The score records whether it believes coverage and verification were sufficient. A 3/5 review with no findings goes to a person.
 
 `--confidence` is a required integer flag. It must match the score written in the published review context. The CLI refuses below 4 before contacting the service, and the service refuses it again.
 
-Deterministic refusals, which also send a PR to a person: binary changes, files without text patches, protected paths (review config, the review skill, `src/stamp*.ts` and `stamp.denyPaths`), more than `stamp.maxChangedLines`, draft or closed PRs, and stale or partial reviews.
+Deterministic refusals, which also send a PR to a person: binary changes, files without text patches, protected paths (review config, the Benedict skill, `src/stamp*.ts` and `stamp.denyPaths`), more than `stamp.maxChangedLines`, draft or closed PRs, and stale or partial reviews.
 
 ### GitHub App
 
-One organization-owned app, "Review Agent", with **Pull requests: read and write**, **Contents: read** and **Metadata: read**. It has no webhook, user authorization or device flow. Install it on the repositories that should be stamped. The installation is the repository allowlist; the base-branch `stamp.enabled` setting is a second, per-repository opt-in.
+One organization-owned app, "Benedict", with **Pull requests: read and write**, **Contents: read** and **Metadata: read**. It has no webhook, user authorization or device flow. Install it on the repositories that should be stamped. The installation is the repository allowlist; the base-branch `stamp.enabled` setting is a second, per-repository opt-in.
 
-Approvals appear as `review-agent[bot]`. The review body names the reviewed base and head, finding count, dropped draft count, confidence, and a link to the published review comment.
+Approvals appear as `benedict[bot]`. The review body names the reviewed base and head, finding count, dropped draft count, confidence, and a link to the published review comment.
 
 Branch protection and rulesets decide whether the approval satisfies merge requirements. The bot approves whenever its gates pass. If the repository also requires code-owner review or another human approval, people handle that manually. Repositories should dismiss stale approvals so new commits require a new review and stamp.
 
 ### Service
 
-`review stamp serve` remains an Effect HTTP service, now stateless:
+`benedict stamp serve` remains an Effect HTTP service, now stateless:
 
 | Setting | Purpose |
 | --- | --- |
@@ -113,9 +113,9 @@ Concurrent duplicate requests can at worst produce two approvals from the same b
 
 ### CLI
 
-- `review stamp approve` gains the required `--confidence <1-5>` flag and adds `confidence` and the published comment URL to the request. Otherwise it keeps its local gates, `--dry-run`, and the `REVIEW_STAMP_URL`/`REVIEW_STAMP_KEY` trust check.
+- `benedict stamp approve` gains the required `--confidence <1-5>` flag and adds `confidence` and the published comment URL to the request. Otherwise it keeps its local gates, `--dry-run`, and the `BENEDICT_STAMP_URL`/`BENEDICT_STAMP_KEY` trust check.
 - The request becomes version 2. The service rejects version 1.
-- Remove `review stamp enroll`, `users` and `remove`.
+- Remove `benedict stamp enroll`, `users` and `remove`.
 - Remove the obsolete `stamp.team` and `stamp.channel` config fields.
 
 ### Agent workflow
@@ -123,15 +123,15 @@ Concurrent duplicate requests can at worst produce two approvals from the same b
 Each repository's `AGENTS.md` requires the review on every PR. The skill's Stamp section changes from "only when the user asks" to "when the user or the repository's agent instructions require it." Suggested repository text:
 
 ```md
-## Review agent
+## Benedict
 
-After opening a PR or pushing to one, use the `review` skill to review the whole
+After opening a PR or pushing to one, use the `benedict` skill to review the whole
 current PR, publish the review, and stamp it. Fix accepted findings and repeat.
 If the stamp is refused, report the reason and request human review; do not
 approve the PR another way.
 ```
 
-`review setup` can later offer to add this section. Agents still never call `gh pr review --approve` directly.
+`benedict setup` can later offer to add this section. Agents still never call `gh pr review --approve` directly.
 
 ### Changes
 
@@ -151,7 +151,7 @@ Tests use fake GitHub responses and cover:
 
 1. On a scratch repository with required approvals, confirm a GitHub App approval counts toward the required review count.
 2. Create and install the app. Deploy the service behind HTTPS.
-3. Distribute `REVIEW_STAMP_URL` and `REVIEW_STAMP_KEY` through normal secret configuration.
+3. Distribute `BENEDICT_STAMP_URL` and `BENEDICT_STAMP_KEY` through normal secret configuration.
 4. Run `--dry-run`, then one real stamp on a test PR.
 5. Enable `stamp` in pilot repositories' base-branch config and add the `AGENTS.md` section.
 

@@ -2,14 +2,14 @@
   "name": "@joshborseth/review",
   "version": "0.1.0",
   "private": true,
-  "description": "A code review skill and deterministic CLI for coding agents.",
+  "description": "Benedict, a code review skill and deterministic CLI for coding agents.",
   "type": "module",
   "bin": {
-    "review": "dist/main.js"
+    "benedict": "dist/main.js"
   },
   "files": [
     "dist",
-    ".agents/skills/review",
+    ".agents/skills/benedict",
     "schemas",
     "stamp-service",
     "README.md"
@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --import tsx --test tests/*.test.ts",
-    "review": "tsx src/main.ts",
+    "benedict": "tsx src/main.ts",
     "schemas": "tsx scripts/write-schemas.ts",
     "prepack": "npm run build"
   },

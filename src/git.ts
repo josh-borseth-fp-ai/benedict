@@ -4,7 +4,7 @@ import { ReviewError } from "./model.js"
 
 export class Git extends Context.Service<Git, {
   readonly run: (cwd: string, args: ReadonlyArray<string>, options?: { readonly timeout?: Duration.Input }) => Effect.Effect<string, ReviewError>
-}>()("review/Git") {
+}>()("benedict/Git") {
   static readonly layer = Layer.effect(Git, Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const run = Effect.fn("Git.run")(function*(cwd: string, args: ReadonlyArray<string>, options?: { readonly timeout?: Duration.Input }) {

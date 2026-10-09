@@ -20,10 +20,10 @@ const write = (repo: string, path: string, source: string | Uint8Array) => {
   writeFileSync(join(repo, path), source)
 }
 
-const configure = (repo: string, config: Record<string, unknown>) => write(repo, ".review/config.json", JSON.stringify(config, null, 2))
+const configure = (repo: string, config: Record<string, unknown>) => write(repo, ".benedict/config.json", JSON.stringify(config, null, 2))
 
 const fixture = (t: TestContext) => {
-  const repo = mkdtempSync(join(tmpdir(), "review-cli-"))
+  const repo = mkdtempSync(join(tmpdir(), "benedict-cli-"))
   t.after(() => rmSync(repo, { recursive: true, force: true }))
   git(repo, "init", "--quiet")
   git(repo, "config", "user.name", "CLI Test")
@@ -51,7 +51,7 @@ const fixture = (t: TestContext) => {
   }
   const check = (findings: ReadonlyArray<unknown>, ...args: string[]) => {
     // Keep generated findings outside the reviewed tree.
-    const inputDir = mkdtempSync(join(tmpdir(), "review-findings-"))
+    const inputDir = mkdtempSync(join(tmpdir(), "benedict-findings-"))
     t.after(() => rmSync(inputDir, { recursive: true, force: true }))
     const input = join(inputDir, "findings.json")
     writeFileSync(input, JSON.stringify({ findings }))
@@ -270,7 +270,7 @@ test("config errors fail closed, and --config resolves relative to the repositor
   assert.equal(result.stdout, "")
   assert.equal(JSON.parse(result.stderr).error.code, "config_error")
   for (const config of ["skills: [security]\n", '{"skills": ["security"],}', '{"severity": {"minimum": "high"}}', '{"skills": null}']) {
-    write(repo, ".review/config.json", config)
+    write(repo, ".benedict/config.json", config)
     assert.equal(run("context").status, 2)
   }
   configure(repo, { skills: ["security"] })

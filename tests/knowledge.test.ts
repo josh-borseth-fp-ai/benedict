@@ -18,8 +18,8 @@ const write = (repo: string, file: string, content: string) => {
   writeFileSync(join(repo, file), content)
 }
 const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n"
-const repoConfig = (repo: string, config: Record<string, unknown>) => write(repo, ".review/config.json", json(config))
-const manifest = (organization: string, value: Record<string, unknown>) => write(organization, ".review/organization.json", json(value))
+const repoConfig = (repo: string, config: Record<string, unknown>) => write(repo, ".benedict/config.json", json(config))
+const manifest = (organization: string, value: Record<string, unknown>) => write(organization, ".benedict/organization.json", json(value))
 const commit = (repo: string, message: string) => { git(repo, "add", "."); git(repo, "commit", "--quiet", "-m", message); return git(repo, "rev-parse", "HEAD") }
 const init = (repo: string) => {
   mkdirSync(repo, { recursive: true })
@@ -30,7 +30,7 @@ const init = (repo: string) => {
 }
 
 const fixture = (t: TestContext) => {
-  const area = mkdtempSync(join(tmpdir(), "review-knowledge-"))
+  const area = mkdtempSync(join(tmpdir(), "benedict-knowledge-"))
   t.after(() => rmSync(area, { recursive: true, force: true }))
   const repo = join(area, "project")
   const organization = join(area, "engineering-knowledge")
@@ -53,7 +53,7 @@ const fixture = (t: TestContext) => {
   const env = {
     ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, ".codex"),
     XDG_CONFIG_HOME: join(home, ".config"), XDG_CACHE_HOME: join(home, ".cache"),
-    REVIEW_CACHE_DIR: cache, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", DISABLE_TELEMETRY: "1"
+    BENEDICT_CACHE_DIR: cache, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", DISABLE_TELEMETRY: "1"
   }
   const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { cwd: repo, env, encoding: "utf8" })
   const context = () => {
@@ -67,7 +67,7 @@ const fixture = (t: TestContext) => {
     assert.equal(result.status, 0, result.stderr)
     return JSON.parse(result.stdout) as { organization: KnowledgeLock; lockChanged: boolean }
   }
-  const lockPath = join(repo, ".review/knowledge.lock.json")
+  const lockPath = join(repo, ".benedict/knowledge.lock.json")
   return { area, repo, organization, home, cache, revision, env, run, context, configure, sync, lockPath }
 }
 
@@ -88,17 +88,17 @@ test("the organization repository can be reviewed with its own repo config", (t)
   assert.equal(result.status, 0, result.stderr)
   const context = JSON.parse(result.stdout) as ReviewContext
   assert.deepEqual(context.config.skills, ["correctness"])
-  assert.deepEqual(context.files.map((file) => file.path), [".review/config.json", "knowledge/engineering.md"])
+  assert.deepEqual(context.files.map((file) => file.path), [".benedict/config.json", "knowledge/engineering.md"])
 })
 
-test("sync requires the organization manifest at .review/organization.json", (t) => {
+test("sync requires the organization manifest at .benedict/organization.json", (t) => {
   const { organization, configure, run, lockPath } = fixture(t)
-  git(organization, "mv", ".review/organization.json", "review.json")
+  git(organization, "mv", ".benedict/organization.json", "review.json")
   commit(organization, "legacy manifest name")
   configure()
   const result = run("sync")
   assert.equal(result.status, 2)
-  assert.match(JSON.parse(result.stderr).error.message, /\.review\/organization\.json/)
+  assert.match(JSON.parse(result.stderr).error.message, /\.benedict\/organization\.json/)
   assert.equal(existsSync(lockPath), false)
 })
 
@@ -219,7 +219,7 @@ test("local and organization knowledge cannot follow symlinks or traverse paths"
   commit(organization, "external link")
   configure()
   assert.equal(run("sync").status, 2)
-  assert.equal(existsSync(join(repo, ".review/knowledge.lock.json")), false)
+  assert.equal(existsSync(join(repo, ".benedict/knowledge.lock.json")), false)
 })
 
 test("source/ref mismatch, malformed locks and unsupported transports fail closed", (t) => {
@@ -245,7 +245,7 @@ test("knowledge cache cannot be placed in the reviewed repo, including through a
   const link = join(area, "cache-link")
   symlinkSync(repo, link)
   for (const cache of [join(repo, "cache"), join(link, "cache")]) {
-    const result = spawnSync(process.execPath, [cli, "sync"], { cwd: repo, encoding: "utf8", env: { ...env, REVIEW_CACHE_DIR: cache } })
+    const result = spawnSync(process.execPath, [cli, "sync"], { cwd: repo, encoding: "utf8", env: { ...env, BENEDICT_CACHE_DIR: cache } })
     assert.equal(result.status, 2)
     assert.equal(JSON.parse(result.stderr).error.code, "knowledge_error")
     assert.equal(existsSync(join(repo, "cache")), false)
@@ -257,7 +257,7 @@ test("setup connects organization knowledge while preserving existing repo confi
   repoConfig(repo, { $schema: "https://example.invalid/config.schema.json", minimumConfidence: 0.9 })
   const result = run("setup", "--organization", organization, "--skip-skills")
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, ".review/config.json"), "utf8")), {
+  assert.deepEqual(JSON.parse(readFileSync(join(repo, ".benedict/config.json"), "utf8")), {
     $schema: "https://example.invalid/config.schema.json", minimumConfidence: 0.9, organization: { source: organization, ref: "HEAD" }
   })
   assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).revision, revision)
@@ -269,10 +269,10 @@ test("setup connects organization knowledge while preserving existing repo confi
 
 test("setup errors preserve config and require explicit non-interactive agent selection", (t) => {
   const { repo, run, lockPath } = fixture(t)
-  write(repo, ".review/config.json", '{"rules":["Local rule"]}\n')
-  const before = readFileSync(join(repo, ".review/config.json"), "utf8")
+  write(repo, ".benedict/config.json", '{"rules":["Local rule"]}\n')
+  const before = readFileSync(join(repo, ".benedict/config.json"), "utf8")
   assert.equal(run("setup", "--organization", "https://user:secret@example.invalid/repo", "--skip-skills").status, 2)
-  assert.equal(readFileSync(join(repo, ".review/config.json"), "utf8"), before)
+  assert.equal(readFileSync(join(repo, ".benedict/config.json"), "utf8"), before)
   assert.equal(existsSync(lockPath), false)
   assert.equal(run("setup", "--yes").status, 2)
   assert.equal(run("setup", "--global", "--project", "--skip-skills").status, 2)
@@ -282,21 +282,21 @@ test("setup installs the bundled skill and reference through Vercel into isolate
   const { run, home, repo } = fixture(t)
   const result = run("setup", "--global", "--agent", "claude-code", "--yes")
   assert.equal(result.status, 0, result.stderr + result.stdout)
-  const skill = join(home, ".claude/skills/review")
-  assert.match(readFileSync(join(skill, "SKILL.md"), "utf8"), /name: review/)
-  assert.equal(readFileSync(join(skill, "references/cli.md"), "utf8"), readFileSync(fileURLToPath(new URL("../.agents/skills/review/references/cli.md", import.meta.url)), "utf8"))
-  assert.equal(existsSync(join(repo, ".review")), false)
-  assert.equal(existsSync(join(repo, ".review/knowledge.lock.json")), false)
+  const skill = join(home, ".claude/skills/benedict")
+  assert.match(readFileSync(join(skill, "SKILL.md"), "utf8"), /name: benedict/)
+  assert.equal(readFileSync(join(skill, "references/cli.md"), "utf8"), readFileSync(fileURLToPath(new URL("../.agents/skills/benedict/references/cli.md", import.meta.url)), "utf8"))
+  assert.equal(existsSync(join(repo, ".benedict")), false)
+  assert.equal(existsSync(join(repo, ".benedict/knowledge.lock.json")), false)
   assert.equal(run("setup", "--agent", "claude-code", "--yes").status, 0)
 })
 
 test("setup supports project skill installation and user installation outside Git", (t) => {
   const { run, repo, area, env, home } = fixture(t)
   assert.equal(run("setup", "--project", "--agent", "claude-code", "--yes").status, 0)
-  assert.equal(existsSync(join(repo, ".claude/skills/review/SKILL.md")), true)
+  assert.equal(existsSync(join(repo, ".claude/skills/benedict/SKILL.md")), true)
   const result = spawnSync(process.execPath, [cli, "setup", "--agent", "claude-code", "--yes"], { cwd: area, env, encoding: "utf8" })
   assert.equal(result.status, 0, result.stderr + result.stdout)
-  assert.equal(existsSync(join(home, ".claude/skills/review/SKILL.md")), true)
+  assert.equal(existsSync(join(home, ".claude/skills/benedict/SKILL.md")), true)
   const invalid = spawnSync(process.execPath, [cli, "setup", "--project", "--yes", "--agent", "claude-code"], { cwd: area, env, encoding: "utf8" })
   assert.equal(invalid.status, 2)
 })
@@ -304,14 +304,14 @@ test("setup supports project skill installation and user installation outside Gi
 test("failed skill installation leaves organization declaration and lock untouched", (t) => {
   const { repo, home, organization, run, lockPath } = fixture(t)
   const config = json({ rules: ["Keep this rule."] })
-  write(repo, ".review/config.json", config)
+  write(repo, ".benedict/config.json", config)
   // Block both the canonical directory and the agent's fallback copy target.
   write(home, ".agents/skills", "blocked")
   write(home, ".claude/skills", "blocked")
   const result = run("setup", "--organization", organization, "--agent", "claude-code", "--yes")
   assert.equal(result.status, 2)
   assert.match(result.stderr, /setup_error/)
-  assert.equal(readFileSync(join(repo, ".review/config.json"), "utf8"), config)
+  assert.equal(readFileSync(join(repo, ".benedict/config.json"), "utf8"), config)
   assert.equal(existsSync(lockPath), false)
 })
 
@@ -331,6 +331,6 @@ test("concurrent syncs sharing a cache pin each repository's selected ref", asyn
     if (coldCache) rmSync(cache, { recursive: true })
     await Promise.all([repo, other].map((cwd) => promisify(execFile)(process.execPath, [cli, "sync", "--update"], { cwd, env })))
     assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).revision, revision)
-    assert.equal(JSON.parse(readFileSync(join(other, ".review/knowledge.lock.json"), "utf8")).revision, next)
+    assert.equal(JSON.parse(readFileSync(join(other, ".benedict/knowledge.lock.json"), "utf8")).revision, next)
   }
 })
