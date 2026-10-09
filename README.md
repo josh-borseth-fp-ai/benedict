@@ -6,23 +6,18 @@ Benedict is a cat who reviews code. He reads the change, reports only defects he
 
 ## Install
 
-Requires Node.js 22.20 or newer and Git. From a local checkout of this repository:
+Requires Node.js 22.20 or newer, Git, and read access to this private repository. Install from GitHub; npm clones the repository with your Git credentials and builds the CLI:
 
 ```sh
-npm ci
-npm run build
-npm install --global .
+gh auth setup-git
+npm install --global github:josh-borseth-fp-ai/benedict
 benedict --help
 benedict setup
 ```
 
-You can also run it from the checkout without a global install:
+`gh auth setup-git` lets Git use your GitHub CLI login for the clone. Append `#<tag-or-commit>` to install a specific version, and rerun the install to upgrade. The package is not published to a registry.
 
-```sh
-npm run benedict -- context --repo /path/to/project
-```
-
-The package is built for local installation; it has not been published to a registry. If your global npm directory is not writable, install with `npm install --global --prefix "$HOME/.local" .` and put `$HOME/.local/bin` on your PATH.
+From a local checkout, `npm ci && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
 
 ## Use it with a coding agent
 
