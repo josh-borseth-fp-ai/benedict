@@ -95,7 +95,7 @@ test("review commands accept approve configuration without weakening review poli
   configure(repo, { skills: ["security"], approve: { enabled: true, denyPaths: ["infra/**"], maxChangedLines: 100 } })
   assert.deepEqual(context().config.skills, ["security"])
   assert.equal(check([]).summary.accepted, 0)
-  for (const config of [{ approve: { enabled: "yes" } }, { approve: { maxChangedLines: 0 } }, { approve: { unknownOption: true } }, { approve: { service: "https://benedict.example.invalid" } }, { stamp: { enabled: true } }]) {
+  for (const config of [{ approve: { enabled: "yes" } }, { approve: { maxChangedLines: 0 } }, { approve: { unknownOption: true } }, { stamp: { enabled: true } }]) {
     configure(repo, config)
     assert.equal(run("context").status, 2)
   }

@@ -12,7 +12,7 @@ export const parsePullRequest = (value: string) => {
   return { repository: `${match[1]}/${match[2]}`, number: Number(match[3]), url: `https://github.com/${match[1]}/${match[2]}/pull/${match[3]}` }
 }
 
-/** The published content of one review. The CLI previews it and the Benedict service posts it. */
+/** The published content of one review. The CLI previews it or posts it as the Benedict GitHub App. */
 export interface PublishedReview {
   readonly base: string
   readonly head: string

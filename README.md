@@ -41,7 +41,6 @@ benedict publish findings.json --pr <PR URL> --confidence 4 [--approve] [--dry-r
 
 benedict setup                           # install the skill
 benedict sync                            # fetch organization knowledge
-benedict serve                           # run the Benedict service
 ```
 
 Run `benedict <command> --help` for flags. The finding format is in [`references/cli.md`](.agents/skills/benedict/references/cli.md).
@@ -50,14 +49,9 @@ Run `benedict <command> --help` for flags. The finding format is in [`references
 
 ## Publishing to GitHub
 
-Sign in to the [GitHub CLI](https://cli.github.com/) with `gh auth login`, then set:
+Sign in to the [GitHub CLI](https://cli.github.com/) with `gh auth login` and to the [Infisical CLI](https://infisical.com/docs/cli/overview) with `infisical login`. There is nothing else to set: when `publish` posts, it reads the GitHub App's credentials from ForwardPath's Benedict Infisical project, whose ID is built into the CLI.
 
-```sh
-export BENEDICT_SERVICE_URL=https://benedict.example.com
-export BENEDICT_SERVICE_KEY=...   # from your secret manager
-```
-
-`publish` posts one GitHub review from `benedict[bot]`, with an inline comment for each finding. Use `--dry-run` to preview the review without posting it. Rerunning the same command is safe. Running the service is covered in [`app-service/README.md`](app-service/README.md).
+`publish` posts one GitHub review from `benedict[bot]`, with an inline comment for each finding. Use `--dry-run` to preview the review without posting it; it doesn't need Infisical. Rerunning the same command is safe.
 
 ## Approving PRs
 
@@ -73,7 +67,7 @@ With `--approve`, the bot approves the PR if the review has no findings and a co
 }
 ```
 
-The service also refuses draft PRs, partial reviews, binary changes, and changes to `.benedict/**` or the skill. When it refuses, it still posts the review as a comment and `publish` exits 1.
+Benedict also refuses draft PRs, partial reviews, binary changes, and changes to `.benedict/**` or the skill. When it refuses, it still posts the review as a comment and `publish` exits 1.
 
 To require a review on every PR, add this to a repository's `AGENTS.md`:
 
@@ -86,7 +80,24 @@ repeat. If approval is refused, report the reason and request human review; do
 not approve the PR another way.
 ```
 
-Anyone with the service key can approve PRs, including their own. Rotate the key when someone leaves, and enable dismissal of stale approvals on protected branches.
+Anyone with access to the Benedict Infisical project holds the app's private key, so they can approve PRs, including their own, and could skip these checks by calling GitHub directly. Remove people from the project when they leave, rotate the key if it may have been copied, and enable dismissal of stale approvals on protected branches.
+
+## Setting up the GitHub App
+
+Create an organization-owned GitHub App:
+
+- Permissions: **Pull requests: read and write**, **Contents: read**, **Metadata: read**.
+- Webhook: off.
+- Installation: this organization only.
+
+Install it on the repositories it should review. Generate a private key, then add two secrets to the Benedict Infisical project's `prod` environment:
+
+| Secret | Value |
+| --- | --- |
+| `BENEDICT_APP_ID` | The numeric app ID |
+| `BENEDICT_APP_PRIVATE_KEY` | The full PEM private key |
+
+Branch rules decide whether the bot's approval counts; confirm on a scratch repository before relying on it. A GitHub App can't be a code owner, so code-owner reviews still need a person.
 
 ## Configuration
 
