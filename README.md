@@ -15,6 +15,8 @@ benedict setup
 
 Rerun the same command to upgrade. To pin a version, replace `latest/download` with `download/v<version>`. Each GitHub release attaches a prebuilt `benedict.tgz`; the package is not published to a registry.
 
+pnpm and Bun install the same URL with `pnpm add --global <url>` or `bun add --global <url>`, and upgrade the same way. Benedict still runs on Node.js, so Node is required with either.
+
 From a local checkout, `npm ci && npm run build && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
 
 ## Use it with a coding agent
