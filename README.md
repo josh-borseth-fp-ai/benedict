@@ -222,13 +222,7 @@ After changing the config schemas in `src/model.ts`, run `npm run schemas` to re
 
 The integration tests run the built executable against temporary repositories and isolated home directories. Publishing tests use a fake `gh` executable and a fake Benedict service; service tests use a fake GitHub. None post live comments or approvals. `npm pack` builds an installable archive containing the CLI and skill.
 
-To release, run `npm version <version> --no-git-tag-version`, merge the change, then tag the merged commit on `main` and push the tag:
-
-```sh
-git tag v<version> && git push origin v<version>
-```
-
-The release workflow checks that the tag matches `package.json`, runs the tests, packs the CLI and skill as `benedict.tgz`, and creates the GitHub release that the install command downloads.
+Every merge to `main` publishes a release. The release workflow picks the next patch version after the latest `v*` tag, runs the tests, packs the CLI and skill as `benedict.tgz`, and creates the tagged GitHub release that the install command downloads. To start a new minor or major version, raise `version` in the PR with `npm version <version> --no-git-tag-version`; the next release uses it. A commit that already has a release tag is not released again.
 
 ## Stamp a PR
 
