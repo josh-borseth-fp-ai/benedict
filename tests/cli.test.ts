@@ -314,7 +314,7 @@ test("help, version and text reports work through the executable", (t) => {
   assert.match(help.stdout, /context/)
   assert.match(help.stdout, /check/)
   assert.equal(run().status, 0)
-  assert.match(run("--version").stdout, /0\.1\.0/)
+  assert.ok(run("--version").stdout.includes(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version))
   const text = run("context", "--format", "text")
   assert.equal(text.status, 0)
   assert.match(text.stdout, /correctness, security/)

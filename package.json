@@ -1,8 +1,13 @@
 {
-  "name": "@joshborseth/review",
+  "name": "@forwardpath/benedict",
   "version": "0.1.0",
   "private": true,
   "description": "Benedict, a code review skill and deterministic CLI for coding agents.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/josh-borseth-fp-ai/benedict.git"
+  },
   "type": "module",
   "bin": {
     "benedict": "dist/main.js"

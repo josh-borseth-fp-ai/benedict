@@ -1,6 +1,6 @@
 # CLI and finding format
 
-Use the installed `benedict` executable. Run `benedict --help` or `benedict <command> --help` for command usage.
+Use the installed `benedict` executable. Run `benedict --help` or `benedict <command> --help` for command usage. If it is not installed, ask the user to install it with `npm install --global https://github.com/josh-borseth-fp-ai/benedict/releases/latest/download/benedict.tgz`.
 
 ## Context
 

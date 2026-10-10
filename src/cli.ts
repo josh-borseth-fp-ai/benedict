@@ -1,3 +1,4 @@
+import { createRequire } from "node:module"
 import { NodeServices } from "@effect/platform-node"
 import { Console, Effect, Option } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
@@ -158,7 +159,9 @@ export const benedictCommand = Command.make("benedict").pipe(
   Command.withSubcommands([contextCommand, checkCommand, publishCommand, serveCommand, syncCommand, setupCommand])
 )
 
-export const run = Command.run(benedictCommand, { version: "0.1.0" }).pipe(
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string }
+
+export const run = Command.run(benedictCommand, { version }).pipe(
   Effect.provide(Git.layer),
   Effect.provide(GitHub.layer),
   Effect.provide(NodeServices.layer),

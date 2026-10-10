@@ -6,23 +6,18 @@ Benedict is a cat who reviews code. He reads the change, reports only defects he
 
 ## Install
 
-Requires Node.js 22.20 or newer and Git. From a local checkout of this repository:
+Requires Node.js 22.20 or newer and Git. Install the latest release from GitHub:
 
 ```sh
-npm ci
-npm run build
-npm install --global .
-benedict --help
+npm install --global https://github.com/josh-borseth-fp-ai/benedict/releases/latest/download/benedict.tgz
 benedict setup
 ```
 
-You can also run it from the checkout without a global install:
+Rerun the same command to upgrade. To pin a version, replace `latest/download` with `download/v<version>`. Each GitHub release attaches a prebuilt `benedict.tgz`; the package is not published to a registry.
 
-```sh
-npm run benedict -- context --repo /path/to/project
-```
+pnpm and Bun install the same URL with `pnpm add --global <url>` or `bun add --global <url>`, and upgrade the same way. Benedict still runs on Node.js, so Node is required with either.
 
-The package is built for local installation; it has not been published to a registry. If your global npm directory is not writable, install with `npm install --global --prefix "$HOME/.local" .` and put `$HOME/.local/bin` on your PATH.
+From a local checkout, `npm ci && npm run build && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
 
 ## Use it with a coding agent
 
@@ -226,6 +221,8 @@ npm run build
 After changing the config schemas in `src/model.ts`, run `npm run schemas` to regenerate `schemas/*.schema.json`; a test fails while they are stale.
 
 The integration tests run the built executable against temporary repositories and isolated home directories. Publishing tests use a fake `gh` executable and a fake Benedict service; service tests use a fake GitHub. None post live comments or approvals. `npm pack` builds an installable archive containing the CLI and skill.
+
+Every merge to `main` publishes a release. The release workflow picks the next patch version after the latest `v*` tag, runs the tests, packs the CLI and skill as `benedict.tgz`, and creates the tagged GitHub release that the install command downloads. To start a new minor or major version, raise `version` in the PR with `npm version <version> --no-git-tag-version`; the next release uses it. A commit that already has a release tag is not released again.
 
 ## Stamp a PR
 
