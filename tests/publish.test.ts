@@ -52,18 +52,14 @@ globalThis.fetch = async (input, init) => {
   const route = request.method + ' ' + path.replace('/repos/example/project', '');
   if (route === 'GET /installation') return mode === 'not-installed' ? json({message:'Not Found'}, 404) : json({id:9, app_slug:'benedict'});
   if (path === '/app/installations/9/access_tokens') return json({token:'installation-token'});
-  if (route === 'GET /pulls/42') return json({...state.pr, draft:false, changed_files:state.files.length});
-  if (route === 'GET /pulls/42/files') return json(state.files.map(file => ({...file, additions:1, deletions:1})));
+  if (route === 'GET /pulls/42') return json(state.pr);
   if (route === 'GET /pulls/42/reviews') return json([]);
   if (route === 'POST /pulls/42/reviews') {
     if (mode === 'lose-review') throw new Error('connection reset');
+    if (mode === 'reject-approval' && body.event === 'APPROVE') return json({message:'Can not approve your own pull request'}, 422);
     return json({state: body.event === 'APPROVE' ? 'APPROVED' : 'COMMENTED', commit_id:body.commit_id, html_url:pr+'#pullrequestreview-99', body:body.body, user:{login:'benedict[bot]'}});
   }
   if (route.startsWith('GET /compare/')) return json({merge_base_commit:{sha:state.pr.base.sha}});
-  if (route === 'GET /contents/.benedict/config.json') {
-    const config = JSON.stringify({approve:{enabled:true, denyPaths: mode === 'deny-src' ? ['src.ts'] : []}});
-    return json({type:'file', encoding:'base64', content:Buffer.from(config).toString('base64'), size:config.length});
-  }
   return json({message:'Unexpected ' + route}, 500);
 };
 `
@@ -121,7 +117,8 @@ const fixture = (t: TestContext) => {
   const writes = () => github().filter(call => call.method !== "GET" && call.path.startsWith("/repos/"))
   const run = (args: string[] = [], env: Record<string, string> = {}) => spawnSync(process.execPath, [
     "--import", hook, cli, "publish", input, "--pr", prUrl,
-    ...(args.includes("--confidence") ? [] : ["--confidence", "4"]), ...args
+    ...(args.includes("--confidence") ? [] : ["--confidence", "4"]),
+    ...(args.includes("--decision") ? [] : ["--decision", "comment"]), ...args
   ], {
     cwd: repo, encoding: "utf8", env: {
       ...process.env, PATH: `${bin}:${process.env.PATH}`, BENEDICT_GH_STATE: statePath, BENEDICT_LOG: logPath,
@@ -206,28 +203,31 @@ test("dry-run renders the exact review, only reads the PR and its diff and needs
   assert.deepEqual(posted.comments, preview.comments)
 })
 
-test("--approve approves a clean review as the app and reports a refusal with exit 1 after publishing", (t) => {
+test("--decision approve approves as the app and reports a refusal with exit 1 after publishing", (t) => {
   const f = fixture(t)
-  writeFileSync(f.input, "[]")
-  const approved = f.success("--approve", "--confidence", "5")
+  const approved = f.success("--decision", "approve", "--confidence", "3")
   assert.deepEqual(approved.approval, { action: "approved", url: `${prUrl}#pullrequestreview-99` })
+  assert.equal(approved.decision, "approve")
   const [approval] = f.writes()
   assert.equal(approval!.body!.event, "APPROVE")
   assert.equal(approval!.body!.commit_id, f.head)
-  assert.match(approval!.body!.body!, /Overall confidence: \*\*5\/5\*\*/)
-  const refused = f.run(["--approve", "--format", "text"], { GITHUB_TEST_MODE: "deny-src" })
+  assert.match(approval!.body!.body!, /Overall confidence: \*\*3\/5\*\*/)
+  const refused = f.run(["--decision", "approve", "--format", "text"], { GITHUB_TEST_MODE: "reject-approval" })
   assert.equal(refused.status, 1, refused.stderr)
-  assert.match(refused.stdout, /^created: https:\/\/github.com\/example\/project\/pull\/42#pullrequestreview-99\napproval refused \(protected_path\): A protected path changed/)
-  assert.deepEqual(f.writes().map(write => write.body!.event), ["APPROVE", "COMMENT"])
-  assert.equal(f.run(["--stamp"]).status, 2)
+  assert.match(refused.stdout, /^created: https:\/\/github.com\/example\/project\/pull\/42#pullrequestreview-99\napproval refused \(write_rejected\): .*Can not approve your own pull request/)
+  assert.deepEqual(f.writes().map(write => write.body!.event), ["APPROVE", "APPROVE", "COMMENT"])
+  assert.equal(f.run(["--approve"]).status, 2)
+  assert.equal(f.run(["--decision", "maybe"]).status, 2)
 })
 
-test("confidence is required and must be an integer from 1 to 5", (t) => {
+test("confidence and decision are required, and confidence is an integer from 1 to 5", (t) => {
   const f = fixture(t)
   assert.equal(f.failure(["--confidence", "6"]).code, "input_error")
   assert.equal(f.failure(["--confidence", "0"]).code, "input_error")
-  const missing = spawnSync(process.execPath, [cli, "publish", f.input, "--pr", prUrl], { cwd: f.repo, encoding: "utf8" })
-  assert.equal(missing.status, 2)
+  for (const args of [["--decision", "comment"], ["--confidence", "4"]]) {
+    const missing = spawnSync(process.execPath, [cli, "publish", f.input, "--pr", prUrl, ...args], { cwd: f.repo, encoding: "utf8" })
+    assert.equal(missing.status, 2)
+  }
   assert.equal(f.calls().length, 0)
 })
 
@@ -282,20 +282,19 @@ test("empty findings still publish a useful summary and optional context", (t) =
   assert.match(result.body, /Verified the caller/)
 })
 
-test("publish uses repository policy and supports explicit reviewed commits and text preview", (t) => {
+test("publish checks skills and supports explicit reviewed commits and text preview", (t) => {
   const f = fixture(t)
-  mkdirSync(join(f.repo, ".benedict"), { recursive: true })
-  writeFileSync(join(f.repo, ".benedict/config.json"), JSON.stringify({ minimumConfidence: 0.95 }))
+  writeFileSync(f.input, JSON.stringify([draft, { ...draft, title: "Unknown skill", skill: "performance" }]))
   const result = f.success("--base", f.base, "--head", f.head)
-  assert.deepEqual(result.summary, { accepted: 0, rejected: 1 })
-  assert.ok(!result.body.includes(draft.title))
+  assert.deepEqual(result.summary, { accepted: 1, rejected: 1 })
+  assert.ok(!result.body.includes("Unknown skill"))
   const text = f.run(["--dry-run", "--format", "text"])
   assert.equal(text.status, 0, text.stderr)
   assert.match(text.stdout, /dry-run: https:\/\/github.com/)
   assert.match(text.stdout, /AI-generated review/)
-  writeFileSync(join(f.repo, ".benedict/config.json"), "{}")
-  assert.match(f.run(["--dry-run", "--format", "text"]).stdout, /\n--- src\.ts:1 ---\n### Invalid result\n/)
+  assert.match(text.stdout, /\n--- src\.ts:1 ---\n### Invalid result\n/)
   assert.equal(f.run(["--worktree"]).status, 2)
+  assert.equal(f.run(["--config", "other.json"]).status, 2)
 })
 
 test("review rendering preserves code fences and encodes unusual source paths", () => {
@@ -308,5 +307,5 @@ test("review rendering preserves code fences and encodes unusual source paths", 
   assert.ok(body.includes("````\n```\ncode\n```\n````"))
   assert.ok(!body.includes("\n## <script>"))
   assert.match(body, /Suggested fix: Keep the original value/)
-  assert.ok(body.includes(`Organization knowledge revision: \`${"c".repeat(40)}\``))
+  assert.ok(body.includes(`Organization skills revision: \`${"c".repeat(40)}\``))
 })

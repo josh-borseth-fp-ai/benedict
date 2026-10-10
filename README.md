@@ -1,6 +1,6 @@
 # Benedict
 
-Benedict is a code review skill for coding agents, plus a CLI that keeps the agent honest. Your agent does the review locally. The CLI throws out any finding it can't back up with a quote from the source. The Benedict GitHub App then posts the review and can approve PRs that come back clean.
+Benedict is a code review skill for coding agents, plus a CLI that keeps the agent honest. Your agent does the review locally, guided by review skills. The CLI throws out any finding it can't back up with a quote from the source. The Benedict GitHub App then posts the review and approves the PR when the agent judges it safe.
 
 Benedict is a cat who reviews code.
 
@@ -21,12 +21,12 @@ Ask your agent to review a change with the `benedict` skill, for example "use be
 
 The agent then:
 
-1. Runs `benedict context` to get the diff and the review policy.
-2. Reads the code and writes draft findings as JSON.
-3. Runs `benedict check`, which drops findings that are outside the diff, don't quote the source, fall below the thresholds, or are duplicates.
-4. For a PR, runs `benedict publish` to post the review.
+1. Runs `benedict context` to get the diff and the review skills that apply to each file.
+2. Reads the relevant skills with `benedict skill`, reviews the code, and writes draft findings as JSON.
+3. Runs `benedict check`, which drops findings that are outside the diff, don't quote the source, use a skill that doesn't apply to the file, or are duplicates.
+4. For a PR, decides whether it is safe to approve and runs `benedict publish` to post the review.
 
-Every review includes an overall **Confidence: N/5**. PR reviews also include a Mermaid diagram of what changed, and PRs that change the UI get screenshots and a short video.
+Every finding has a severity and a confidence, and every review includes an overall **Confidence: N/5**. PR reviews also include a Mermaid diagram of what changed, and PRs that change the UI get screenshots and a short video.
 
 ## Commands
 
@@ -35,12 +35,13 @@ benedict context                         # review HEAD~1..HEAD
 benedict context --base main --head HEAD # a different range
 benedict context --worktree              # uncommitted changes
 benedict context --pr <PR URL>           # a GitHub PR
+benedict skill <name> --base <commit>    # print a review skill
 
 benedict check findings.json             # validate draft findings
-benedict publish findings.json --pr <PR URL> --confidence 4 [--approve] [--dry-run]
+benedict publish findings.json --pr <PR URL> --confidence 4 --decision approve|comment [--dry-run]
 
 benedict setup                           # install the skill
-benedict sync                            # fetch organization knowledge
+benedict sync                            # fetch organization skills
 ```
 
 Run `benedict <command> --help` for flags. The finding format is in [`references/cli.md`](.agents/skills/benedict/references/cli.md).
@@ -55,19 +56,9 @@ Sign in to the [GitHub CLI](https://cli.github.com/) with `gh auth login` and to
 
 ## Approving PRs
 
-With `--approve`, the bot approves the PR if the review has no findings and a confidence of 4/5 or higher. The repository opts in on its base branch:
+Every PR review ends with the agent's own decision on whether the PR is safe to approve, passed as `--decision approve` or `--decision comment`. Findings and the confidence score inform that decision but don't decide it. With `approve`, the bot submits the review as an approval of the exact reviewed commit. There is nothing to configure: installing the GitHub App on a repository turns approval on.
 
-```json
-{
-  "approve": {
-    "enabled": true,
-    "denyPaths": ["infra/**", ".github/workflows/**"],
-    "maxChangedLines": 400
-  }
-}
-```
-
-Benedict also refuses draft PRs, partial reviews, binary changes, and changes to `.benedict/**` or the skill. When it refuses, it still posts the review as a comment and `publish` exits 1.
+The CLI only checks that the approval covers what was reviewed: the PR head must be the reviewed commit, the review must start at the PR's merge base, and the bot won't re-approve a commit after a person dismissed its approval. When it refuses, it still posts the review as a comment and `publish` exits 1.
 
 To require a review on every PR, add this to a repository's `AGENTS.md`:
 
@@ -75,12 +66,12 @@ To require a review on every PR, add this to a repository's `AGENTS.md`:
 ## Benedict
 
 After opening a PR or pushing to one, use the `benedict` skill to review the whole
-current PR, publish the review, and request approval. Fix accepted findings and
-repeat. If approval is refused, report the reason and request human review; do
-not approve the PR another way.
+current PR and publish the review with your approval decision. Fix accepted
+findings and repeat. If Benedict doesn't approve, report why and request human
+review; do not approve the PR another way.
 ```
 
-Anyone with access to the Benedict Infisical project holds the app's private key, so they can approve PRs, including their own, and could skip these checks by calling GitHub directly. Remove people from the project when they leave, rotate the key if it may have been copied, and enable dismissal of stale approvals on protected branches.
+Approval is the model's judgment, so content in a PR can try to talk it into approving. Keep branch protection and required human reviewers where that matters. Anyone with access to the Benedict Infisical project holds the app's private key, so they can approve PRs, including their own, by calling GitHub directly. Remove people from the project when they leave, rotate the key if it may have been copied, and enable dismissal of stale approvals on protected branches.
 
 ## Setting up the GitHub App
 
@@ -99,32 +90,31 @@ Install it on the repositories it should review. Generate a private key, then ad
 
 Branch rules decide whether the bot's approval counts; confirm on a scratch repository before relying on it. A GitHub App can't be a code owner, so code-owner reviews still need a person.
 
-## Configuration
+## Review skills
 
-Add an optional `.benedict/config.json` to the reviewed repository:
+Review skills tell the agent what to look for. Benedict ships `correctness` and `security`. Add your own as `.benedict/skills/<name>/SKILL.md` in the reviewed repository, in the usual skill format:
 
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/josh-borseth-fp-ai/benedict/main/schemas/config.schema.json",
-  "skills": ["correctness", "security"],
-  "minimumSeverity": "medium",
-  "minimumConfidence": 0.7,
-  "paths": [{ "pattern": "api/**", "skills": ["security"] }],
-  "rules": ["Do not report style-only issues."]
-}
+```md
+---
+name: payments
+description: Money handling, idempotency and currency rounding.
+paths: ["billing/**"]
+---
+
+Report double charges, lost refunds and rounding that changes totals.
 ```
 
-The values shown are the defaults, apart from `paths` and `rules`.
+`paths` is optional; without it the skill applies to every file. Skills are read from the review's base commit, so a PR can't change the skills it's reviewed under. See [`references/skills.md`](.agents/skills/benedict/references/skills.md).
 
-## Organization knowledge
+## Organization skills
 
-Teams can share review rules and Markdown docs from a separate Git repository that contains a `.benedict/organization.json` manifest. Connect a project with:
+Teams can share skills from a separate Git repository that keeps them in `.benedict/skills/`. Connect a project with:
 
 ```sh
-benedict setup --organization https://github.com/your-org/engineering-knowledge.git
+benedict setup --organization https://github.com/your-org/engineering-skills.git
 ```
 
-This pins a revision in `.benedict/knowledge.lock.json`. Commit that file. `benedict sync` restores the pinned revision on a new machine, and `benedict sync --update` moves it forward. See [`references/knowledge.md`](.agents/skills/benedict/references/knowledge.md) for details.
+This writes `.benedict/config.json`, which holds only the organization source, and pins a revision in `.benedict/organization.lock.json`. Commit both. `benedict sync` restores the pinned revision on a new machine, and `benedict sync --update` moves it forward.
 
 ## Develop
 
@@ -135,4 +125,4 @@ npm test
 npm run build
 ```
 
-After changing the config schemas in `src/model.ts`, run `npm run schemas`. Every merge to `main` releases the next patch version.
+After changing the config schema in `src/model.ts`, run `npm run schemas`. Every merge to `main` releases the next patch version.

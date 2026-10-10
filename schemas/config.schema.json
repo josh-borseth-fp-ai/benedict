@@ -7,68 +7,6 @@
     "$schema": {
       "type": "string"
     },
-    "skills": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "correctness",
-          "security"
-        ]
-      }
-    },
-    "minimumSeverity": {
-      "type": "string",
-      "enum": [
-        "low",
-        "medium",
-        "high",
-        "critical"
-      ]
-    },
-    "minimumConfidence": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
-    },
-    "rules": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "paths": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "pattern": {
-            "type": "string"
-          },
-          "skills": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "correctness",
-                "security"
-              ]
-            }
-          }
-        },
-        "required": [
-          "pattern",
-          "skills"
-        ],
-        "additionalProperties": false
-      }
-    },
-    "knowledge": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
     "organization": {
       "type": "object",
       "properties": {
@@ -82,25 +20,6 @@
       "required": [
         "source"
       ],
-      "additionalProperties": false
-    },
-    "approve": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "denyPaths": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "maxChangedLines": {
-          "type": "integer",
-          "minimum": 1
-        }
-      },
       "additionalProperties": false
     }
   },

@@ -8,10 +8,10 @@ Do not launch another agent. Do not read provider credentials. Do not edit the r
 
 The project is pre-production with no users. Do not add backwards compatibility, migrations, or legacy fallbacks; replace old behavior outright.
 
-Persisted review state is JSON under `.benedict/`, never YAML:
+Persisted review state lives under `.benedict/`:
 
-- `.benedict/config.json`: repository policy, knowledge, organization source, and approve settings (`ConfigFile`).
-- `.benedict/organization.json`: organization manifest with `defaults`, `required`, and `knowledge` (`OrganizationManifest`).
-- `.benedict/knowledge.lock.json`: the pinned organization revision written by `benedict sync`.
+- `.benedict/config.json`: the optional organization source, and nothing else (`ConfigFile`).
+- `.benedict/organization.lock.json`: the pinned organization revision written by `benedict sync` (`OrganizationLock`).
+- `.benedict/skills/<name>/SKILL.md`: review skills, in the standard skill format. The organization repository uses the same layout. Built-in skills live in `review-skills/`.
 
-Path constants and schemas live in `src/model.ts`; import them rather than repeating paths. Repository policy, organization `defaults`, and `required` share field names (`skills`, `minimumSeverity`, `minimumConfidence`, `paths`, `rules`). The approve workflow protects `.benedict/**`. After changing a config schema, run `npm run schemas` to regenerate `schemas/*.schema.json`.
+State files are JSON, never YAML; skill frontmatter is the only YAML. Path constants and schemas live in `src/model.ts`; import them rather than repeating paths. Reviews read config, lock and skills from the base commit, never from the change under review. Approval is the reviewer's `--decision`; the CLI adds no approval policy. Severity and confidence are reported, never used as cutoffs. After changing the config schema, run `npm run schemas` to regenerate `schemas/config.schema.json`.

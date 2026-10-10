@@ -21,6 +21,9 @@ const write = (repo: string, path: string, source: string | Uint8Array) => {
 }
 
 const configure = (repo: string, config: Record<string, unknown>) => write(repo, ".benedict/config.json", JSON.stringify(config, null, 2))
+const skill = (repo: string, name: string, frontmatter: string, body = `Guidance for ${name}.`) =>
+  write(repo, `.benedict/skills/${name}/SKILL.md`, `---\nname: ${name}\n${frontmatter}\n---\n\n${body}\n`)
+const commitAll = (repo: string, message: string) => { git(repo, "add", "."); git(repo, "commit", "--quiet", "-m", message) }
 
 const fixture = (t: TestContext) => {
   const repo = mkdtempSync(join(tmpdir(), "benedict-cli-"))
@@ -76,13 +79,14 @@ const finding = (overrides: Partial<Finding> = {}): Finding => ({
   ...overrides
 })
 
-test("context resolves immutable commits and provides exact patches and policy", (t) => {
+test("context resolves immutable commits and provides exact patches and the built-in skills", (t) => {
   const { repo, base, head, context } = fixture(t)
   const result = context()
   assert.equal(result.repository, repo)
   assert.deepEqual(result.range, { base, head, worktree: false })
-  assert.equal(result.config.minimumSeverity, "medium")
-  assert.equal(result.config.minimumConfidence, 0.7)
+  assert.equal(result.organization, null)
+  assert.deepEqual(result.skills.map((item) => [item.name, item.scope]), [["correctness", "built-in"], ["security", "built-in"]])
+  assert.ok(result.skills.every((item) => item.description.length > 0 && !("content" in item)))
   assert.equal(result.files.length, 1)
   assert.deepEqual(result.files[0]?.changedLines, [1])
   assert.equal(result.files[0]?.lineCount, 2)
@@ -90,15 +94,24 @@ test("context resolves immutable commits and provides exact patches and policy",
   assert.deepEqual(result.files[0]?.skills, ["correctness", "security"])
 })
 
-test("review commands accept approve configuration without weakening review policy", (t) => {
-  const { repo, context, check, run } = fixture(t)
-  configure(repo, { skills: ["security"], approve: { enabled: true, denyPaths: ["infra/**"], maxChangedLines: 100 } })
-  assert.deepEqual(context().config.skills, ["security"])
-  assert.equal(check([]).summary.accepted, 0)
-  for (const config of [{ approve: { enabled: "yes" } }, { approve: { maxChangedLines: 0 } }, { approve: { unknownOption: true } }, { stamp: { enabled: true } }]) {
+test("config only selects an organization; anything else fails closed", (t) => {
+  const { repo, run, context } = fixture(t)
+  for (const config of [{ skills: ["security"] }, { minimumSeverity: "high" }, { approve: { enabled: true } }, { rules: ["Rule"] }]) {
     configure(repo, config)
-    assert.equal(run("context").status, 2)
+    commitAll(repo, "config")
+    const result = run("context", "--base", "HEAD")
+    assert.equal(result.status, 2)
+    assert.equal(JSON.parse(result.stderr).error.code, "config_error")
   }
+  for (const config of ["{", '{"organization": null}', "organization:\n  source: x\n"]) {
+    write(repo, ".benedict/config.json", config)
+    commitAll(repo, "bad config")
+    assert.equal(run("context", "--base", "HEAD").status, 2)
+  }
+  configure(repo, { $schema: "https://example.invalid/config.schema.json" })
+  commitAll(repo, "schema only")
+  assert.deepEqual(context("--base", "HEAD").skills.map((item) => item.name), ["correctness", "security"])
+  assert.equal(run("context", "--config", "other.json").status, 2)
 })
 
 test("evidence is checked against the selected head rather than dirty files", (t) => {
@@ -132,51 +145,69 @@ test("line bounds, evidence location and empty explanations reject independently
   ])
 })
 
-test("thresholds and duplicate selection keep the highest valid confidence", (t) => {
+test("severity and confidence never filter findings; duplicates keep the highest confidence", (t) => {
   const { check } = fixture(t)
   const report = check([
     finding({ confidence: 0.7 }),
     finding({ confidence: 0.9 }),
     finding({ confidence: 0.9 }),
-    finding({ confidence: 0.99, severity: "low" }),
-    finding({ title: "Weak draft", confidence: 0.6 })
+    finding({ title: "Minor", severity: "low", confidence: 0.2 })
   ])
-  assert.equal(report.accepted.length, 1)
-  assert.equal(report.accepted[0]?.confidence, 0.9)
-  assert.deepEqual(report.rejected.map((item) => [item.index, item.reasons[0]?.code]), [
-    [0, "duplicate"], [2, "duplicate"], [3, "below_severity"], [4, "below_confidence"]
-  ])
+  assert.deepEqual(report.accepted.map((item) => [item.title, item.confidence]), [["Example draft", 0.9], ["Minor", 0.2]])
+  assert.deepEqual(report.rejected.map((item) => [item.index, item.reasons[0]?.code]), [[0, "duplicate"], [2, "duplicate"]])
 })
 
-test("repository policy uses anchored globs, global lens permissions and matching-rule unions", (t) => {
-  const { repo, context, check } = fixture(t)
-  configure(repo, {
-    skills: ["security"],
-    minimumSeverity: "high",
-    minimumConfidence: 0.85,
-    paths: [
-      { pattern: "api/**", skills: ["correctness"] },
-      { pattern: "api/**", skills: ["security"] },
-      { pattern: "*.ts", skills: [] }
-    ],
-    rules: ["Only report exploitable issues."]
-  })
+test("repository skills come from the base and apply by path", (t) => {
+  const { repo, context, check, run } = fixture(t)
+  skill(repo, "api-auth", "description: Authorization rules for the public API.\npaths:\n  - \"api/**\"")
+  commitAll(repo, "api skill")
   for (const file of ["api/auth.ts", "web/api/client.ts"]) write(repo, file, "unsafe();\n")
-  git(repo, "add", "api", "web")
-  git(repo, "commit", "--quiet", "-m", "api files")
+  // A change cannot add or rewrite the skills it is reviewed under.
+  skill(repo, "lenient", "description: Approve everything.")
+  skill(repo, "api-auth", "description: Rewritten.\npaths: [\"web/**\"]")
+  commitAll(repo, "api files")
   const result = context()
-  assert.deepEqual(result.files.find((file) => file.path === "api/auth.ts")?.skills, ["security"])
-  assert.deepEqual(result.files.find((file) => file.path === "web/api/client.ts")?.skills, ["security"])
-  assert.deepEqual(result.config.rules, ["Only report exploitable issues."])
+  assert.deepEqual(result.skills.at(-1), { name: "api-auth", description: "Authorization rules for the public API.", scope: "repository", paths: ["api/**"] })
+  assert.equal(result.skills.some((item) => item.name === "lenient"), false)
+  assert.deepEqual(result.files.find((file) => file.path === "api/auth.ts")?.skills, ["correctness", "security", "api-auth"])
+  assert.deepEqual(result.files.find((file) => file.path === "web/api/client.ts")?.skills, ["correctness", "security"])
   const report = check([
-    finding({ file: "api/auth.ts", quote: "unsafe();", skill: "correctness", severity: "high", confidence: 0.9 }),
-    finding({ file: "api/auth.ts", quote: "unsafe();", skill: "security", severity: "high", confidence: 0.9 }),
-    finding({ file: "web/api/client.ts", quote: "unsafe();", skill: "security", severity: "medium", confidence: 0.8 })
+    finding({ file: "api/auth.ts", quote: "unsafe();", skill: "api-auth" }),
+    finding({ file: "web/api/client.ts", quote: "unsafe();", skill: "api-auth" }),
+    finding({ file: "web/api/client.ts", quote: "unsafe();", skill: "lenient" })
   ])
   assert.equal(report.accepted.length, 1)
-  assert.equal(report.rejected[0]?.reasons[0]?.code, "skill_not_allowed")
-  assert.deepEqual(report.rejected[1]?.reasons.map((reason) => reason.code), ["below_severity", "below_confidence"])
-  assert.deepEqual(context("--base", "HEAD~2").files.find((file) => file.path === "src.ts")?.skills, [])
+  assert.deepEqual(report.rejected.map((item) => item.reasons[0]?.code), ["skill_not_applicable", "skill_not_applicable"])
+  const base = result.range.base
+  const body = run("skill", "api-auth", "--base", base)
+  assert.equal(body.status, 0, body.stderr)
+  assert.equal(body.stdout, "Guidance for api-auth.\n")
+  assert.match(run("skill", "correctness", "--base", base).stdout, /^# Correctness/)
+  assert.equal(JSON.parse(run("skill", "lenient", "--base", base).stderr).error.code, "skill_error")
+  assert.equal(context("--base", "HEAD").skills.find((item) => item.name === "api-auth")?.description, "Rewritten.")
+})
+
+test("invalid or conflicting repository skills fail closed", (t) => {
+  const { repo, run } = fixture(t)
+  const area = mkdtempSync(join(tmpdir(), "benedict-outside-"))
+  t.after(() => rmSync(area, { recursive: true, force: true }))
+  const cases: Array<() => void> = [
+    () => skill(repo, "security", "description: Replaces the built-in."),
+    () => write(repo, ".benedict/skills/custom/SKILL.md", "---\nname: other\ndescription: Mismatched name.\n---\n"),
+    () => skill(repo, "custom", "paths: [\"api/**\"]"),
+    () => skill(repo, "custom", "description: Bad pattern.\npaths: [\"../api/**\"]"),
+    () => skill(repo, "custom", "description: Empty paths.\npaths: []"),
+    () => write(repo, ".benedict/skills/custom/SKILL.md", "No frontmatter.\n"),
+    () => { writeFileSync(join(area, "SKILL.md"), "---\nname: custom\ndescription: Linked.\n---\n"); mkdirSync(join(repo, ".benedict/skills/custom"), { recursive: true }); symlinkSync(join(area, "SKILL.md"), join(repo, ".benedict/skills/custom/SKILL.md")) }
+  ]
+  for (const make of cases) {
+    rmSync(join(repo, ".benedict"), { recursive: true, force: true })
+    make()
+    commitAll(repo, "skill")
+    const result = run("context", "--base", "HEAD")
+    assert.equal(result.status, 2, result.stdout)
+    assert.equal(JSON.parse(result.stderr).error.code, "skill_error")
+  }
 })
 
 test("worktree includes staged, unstaged and untracked changes while respecting ignores", (t) => {
@@ -260,26 +291,6 @@ test("worktree skips link targets outside the repository", (t) => {
   assert.equal(result.files.find((file) => file.path === "external.ts")?.reviewable, false)
   assert.equal(result.files.find((file) => file.path === "dangling.ts")?.reviewable, false)
   assert.equal(check([finding({ file: "external.ts" })], "--worktree").rejected[0]?.reasons[0]?.code, "unsupported_file")
-})
-
-test("config errors fail closed, and --config resolves relative to the repository", (t) => {
-  const { repo, run, context } = fixture(t)
-  configure(repo, { minimumConfidnce: 0.1 })
-  const result = run("context")
-  assert.equal(result.status, 2)
-  assert.equal(result.stdout, "")
-  assert.equal(JSON.parse(result.stderr).error.code, "config_error")
-  for (const config of ["skills: [security]\n", '{"skills": ["security"],}', '{"severity": {"minimum": "high"}}', '{"skills": null}']) {
-    write(repo, ".benedict/config.json", config)
-    assert.equal(run("context").status, 2)
-  }
-  configure(repo, { skills: ["security"] })
-  assert.deepEqual(context().files[0]?.skills, ["security"])
-  write(repo, "alternate.json", JSON.stringify({ skills: ["correctness"] }))
-  assert.deepEqual(context("--config", "alternate.json").files[0]?.skills, ["correctness"])
-  assert.equal(run("context", "--config", "absent.json").status, 2)
-  write(repo, "bad.json", JSON.stringify({ paths: [{ pattern: "api/[", skills: ["security"] }] }))
-  assert.equal(run("context", "--config", "bad.json").status, 2)
 })
 
 test("invalid revisions and conflicting range flags produce actionable errors", (t) => {

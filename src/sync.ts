@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto"
 import { Effect, FileSystem, Path } from "effect"
 import { readRepositoryConfig } from "./config.js"
 import { Git } from "./git.js"
-import { cacheDirectory, readLock, readOrganizationBundle, readRepositoryKnowledge, resolveOrganization, writeLock } from "./knowledge.js"
 import { ReviewError, configPath } from "./model.js"
 import type { ConfigFile } from "./model.js"
-import { resolvePolicy } from "./policy.js"
+import { cacheDirectory, readLock, readOrganizationSkills, resolveOrganization, writeLock } from "./organization.js"
+import { combineSkills, readBuiltinSkills } from "./skills.js"
 
 export const repositoryRoot = Effect.fn("Review.repositoryRoot")(function*(directory: string) {
   const git = yield* Git
@@ -13,10 +13,10 @@ export const repositoryRoot = Effect.fn("Review.repositoryRoot")(function*(direc
   return (yield* git.run(path.resolve(directory), ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "")
 })
 
-/** Fetching is explicit. This prepares a validated bundle without changing repo files. */
-export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root: string, decoded: ConfigFile, update: boolean) {
+/** Fetching is explicit. This prepares validated organization skills without changing repo files. */
+export const prepareOrganization = Effect.fn("Organization.prepare")(function*(root: string, decoded: ConfigFile, update: boolean) {
   if (!decoded.organization) {
-    return yield* new ReviewError({ code: "knowledge_error", message: `No organization configured. Add organization.source to ${configPath} or run benedict setup --organization <Git URL> inside the repository.` })
+    return yield* new ReviewError({ code: "organization_error", message: `No organization configured. Add organization.source to ${configPath} or run benedict setup --organization <Git URL> inside the repository.` })
   }
   const git = yield* Git
   const fs = yield* FileSystem.FileSystem
@@ -24,10 +24,8 @@ export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root
   const resolved = yield* resolveOrganization(root, decoded.organization)
   const existing = yield* readLock(root)
   if (existing && !update && (existing.source !== resolved.source || existing.ref !== resolved.ref)) {
-    return yield* new ReviewError({ code: "knowledge_unavailable", message: "Organization source/ref changed. Run benedict sync --update to review and record the new revision." })
+    return yield* new ReviewError({ code: "organization_unavailable", message: "Organization source/ref changed. Run benedict sync --update to review and record the new revision." })
   }
-  // Validate local knowledge before fetching or writing a lock.
-  yield* readRepositoryKnowledge(root, decoded.knowledge ?? [])
   const cache = yield* cacheDirectory(root, resolved.source)
   const parent = path.dirname(cache)
   if (!(yield* fs.exists(cache))) {
@@ -44,7 +42,7 @@ export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root
     }))
   }
   const bare = (yield* git.run(cache, ["rev-parse", "--is-bare-repository"])).trim()
-  if (bare !== "true") return yield* new ReviewError({ code: "knowledge_error", message: "Knowledge cache is not a bare Git repository." })
+  if (bare !== "true") return yield* new ReviewError({ code: "organization_error", message: "The organization cache is not a bare Git repository." })
   let revision: string
   if (existing && !update) {
     revision = existing.revision
@@ -62,22 +60,16 @@ export const prepareOrganization = Effect.fn("Knowledge.prepare")(function*(root
     }))
   }
   const lock = { version: 1 as const, ...resolved, revision }
-  const bundle = yield* readOrganizationBundle(cache, lock)
-  yield* Effect.try({
-    try: () => resolvePolicy(decoded, null, bundle),
-    catch: (error) => error instanceof ReviewError ? error : new ReviewError({ code: "config_error", message: String(error) })
-  })
-  return bundle
+  const skills = yield* readOrganizationSkills(cache, lock)
+  yield* combineSkills(yield* readBuiltinSkills(), skills)
+  return { lock, skills }
 })
 
-export const syncOrganization = Effect.fn("Knowledge.sync")(function*(root: string, config: string | undefined, update: boolean) {
-  const { decoded } = yield* readRepositoryConfig(root, config)
-  const bundle = yield* prepareOrganization(root, decoded, update)
+export const syncOrganization = Effect.fn("Organization.sync")(function*(root: string, update: boolean) {
+  const { decoded } = yield* readRepositoryConfig(root)
+  const { lock, skills } = yield* prepareOrganization(root, decoded, update)
   const previous = yield* readLock(root)
-  if (JSON.stringify(previous) !== JSON.stringify(bundle.lock)) yield* writeLock(root, bundle.lock)
-  return {
-    organization: bundle.lock,
-    knowledgeFiles: bundle.knowledge.map((document) => document.path),
-    lockChanged: JSON.stringify(previous) !== JSON.stringify(bundle.lock)
-  }
+  const lockChanged = JSON.stringify(previous) !== JSON.stringify(lock)
+  if (lockChanged) yield* writeLock(root, lock)
+  return { organization: lock, skills: skills.map((skill) => skill.name), lockChanged }
 })
