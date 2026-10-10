@@ -187,12 +187,11 @@ test("repository skills come from the base and apply by path", (t) => {
   assert.equal(context("--base", "HEAD").skills.find((item) => item.name === "api-auth")?.description, "Rewritten.")
 })
 
-test("invalid or conflicting repository skills fail closed", (t) => {
+test("invalid repository skills fail closed", (t) => {
   const { repo, run } = fixture(t)
   const area = mkdtempSync(join(tmpdir(), "benedict-outside-"))
   t.after(() => rmSync(area, { recursive: true, force: true }))
   const cases: Array<() => void> = [
-    () => skill(repo, "security", "description: Replaces the built-in."),
     () => write(repo, ".benedict/skills/custom/SKILL.md", "---\nname: other\ndescription: Mismatched name.\n---\n"),
     () => skill(repo, "custom", "paths: [\"api/**\"]"),
     () => skill(repo, "custom", "description: Bad pattern.\npaths: [\"../api/**\"]"),

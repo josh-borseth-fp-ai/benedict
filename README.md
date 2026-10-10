@@ -104,7 +104,7 @@ paths: ["billing/**"]
 Report double charges, lost refunds and rounding that changes totals.
 ```
 
-`paths` is optional; without it the skill applies to every file. Skills are read from the review's base commit, so a PR can't change the skills it's reviewed under. See [`references/skills.md`](.agents/skills/benedict/references/skills.md).
+`paths` is optional; without it the skill applies to every file. A repository skill with the same name as an organization or built-in skill replaces it. Skills are read from the review's base commit, so a PR can't change the skills it's reviewed under. See [`references/skills.md`](.agents/skills/benedict/references/skills.md).
 
 ## Organization skills
 
