@@ -16,7 +16,7 @@ Comments and approvals appear as `<app-slug>[bot]`. Branch protection and rulese
 
 ## Deployment
 
-Build and install the Benedict CLI with Node.js 22.20 or newer. Provide these settings through the host's environment or secret manager:
+Install the Benedict CLI with Node.js 22.20 or newer, using the release install command in the [main README](../README.md#install). Provide these settings through the host's environment or secret manager:
 
 | Setting | Purpose |
 | --- | --- |

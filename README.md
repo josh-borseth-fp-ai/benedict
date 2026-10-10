@@ -13,9 +13,7 @@ npm install --global https://github.com/josh-borseth-fp-ai/benedict/releases/lat
 benedict setup
 ```
 
-Rerun the same command to upgrade. To pin a version, replace `latest/download` with `download/v<version>`. The package is not published to a registry.
-
-Each release attaches a prebuilt `benedict.tgz`. To release, set `version` in `package.json`, merge, and push a matching `v<version>` tag; the release workflow runs the tests, packs the CLI and skill, and creates the GitHub release.
+Rerun the same command to upgrade. To pin a version, replace `latest/download` with `download/v<version>`. Each GitHub release attaches a prebuilt `benedict.tgz`; the package is not published to a registry.
 
 From a local checkout, `npm ci && npm run build && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
 
@@ -221,6 +219,14 @@ npm run build
 After changing the config schemas in `src/model.ts`, run `npm run schemas` to regenerate `schemas/*.schema.json`; a test fails while they are stale.
 
 The integration tests run the built executable against temporary repositories and isolated home directories. Publishing tests use a fake `gh` executable and a fake Benedict service; service tests use a fake GitHub. None post live comments or approvals. `npm pack` builds an installable archive containing the CLI and skill.
+
+To release, run `npm version <version> --no-git-tag-version`, merge the change, then tag the merged commit on `main` and push the tag:
+
+```sh
+git tag v<version> && git push origin v<version>
+```
+
+The release workflow checks that the tag matches `package.json`, runs the tests, packs the CLI and skill as `benedict.tgz`, and creates the GitHub release that the install command downloads.
 
 ## Stamp a PR
 
