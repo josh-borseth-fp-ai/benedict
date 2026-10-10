@@ -3,7 +3,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ReviewResult, reviewsEndpoint } from "./app-protocol.js"
 import type { ReviewRequest } from "./app-protocol.js"
 import { checkFindings, readFindings } from "./check.js"
-import { maxCommentBytes, parsePullRequest, renderComment } from "./comment.js"
+import { oversized, parsePullRequest, renderReview } from "./comment.js"
 import { collectSnapshot } from "./context.js"
 import { Git } from "./git.js"
 import { GitHub } from "./github.js"
@@ -11,6 +11,7 @@ import { ReviewError } from "./model.js"
 
 const Sha = Schema.String.check(Schema.makeFilter((value) => /^[a-f0-9]{40}$/.test(value)))
 const PullRequest = Schema.Struct({ state: Schema.Literals(["open", "closed"]), head: Schema.Struct({ sha: Sha }), base: Schema.Struct({ sha: Sha }) })
+const PullRequestFile = Schema.Struct({ filename: Schema.String, patch: Schema.optional(Schema.String) })
 
 export interface PublishOptions {
   readonly findings: string
@@ -21,7 +22,7 @@ export interface PublishOptions {
   readonly config?: string
   readonly contextFile?: string
   readonly confidence: number
-  readonly stamp: boolean
+  readonly approve: boolean
   readonly dryRun: boolean
 }
 
@@ -55,12 +56,12 @@ const send = Effect.fn("Review.send")(function*(request: ReviewRequest) {
     Effect.timeout("60 seconds"),
     Effect.provide(FetchHttpClient.layer),
     Effect.provideService(FetchHttpClient.RequestInit, { redirect: "error" }),
-    Effect.mapError((error) => error instanceof ReviewError ? error : fail("service_error", "Benedict service request failed. The comment or approval may have reached GitHub; rerunning the same command is safe because the service detects them. No automatic retry was made."))
+    Effect.mapError((error) => error instanceof ReviewError ? error : fail("service_error", "Benedict service request failed. The review or approval may have reached GitHub; rerunning the same command is safe because the service detects them. No automatic retry was made."))
   )
   const decoded = yield* Schema.decodeUnknownEffect(ReviewResult)(result).pipe(
     Effect.mapError(() => fail("service_error", "Unexpected Benedict service response; inspect the PR before retrying."))
   )
-  if (decoded.pr !== request.pr || decoded.head !== request.head || !decoded.comment.url.startsWith(`${request.pr}#issuecomment-`)) {
+  if (decoded.pr !== request.pr || decoded.head !== request.head || !decoded.review.url.startsWith(`${request.pr}#pullrequestreview-`)) {
     return yield* fail("service_error", "The Benedict service response does not identify the reviewed PR and commit; inspect the PR.")
   }
   return decoded
@@ -94,18 +95,24 @@ export const publishReview = Effect.fn("Review.publish")(function*(options: Publ
   const prMergeBase = options.base === undefined ? base : yield* resolveMergeBase
   const sharedBase = (yield* git.run(snapshot.context.repository, ["merge-base", prMergeBase, report.range.base])).trim()
   if (sharedBase !== prMergeBase) return yield* fail("range_error", "Reviewed base is outside the PR range. Use the PR merge base or a later ancestor of its head.")
+  // GitHub's PR patches decide which findings become inline comments, exactly as the service renders them.
+  const patches = new Map<string, string>()
+  for (let page = 1; page <= 30; page++) {
+    const files = yield* decode(Schema.Array(PullRequestFile), yield* gh.request(`repos/${target.repository}/pulls/${target.number}/files?per_page=100&page=${page}`))
+    for (const file of files) if (file.patch !== undefined) patches.set(file.filename, file.patch)
+    if (files.length < 100) break
+  }
   const request: ReviewRequest = {
     version: 1, pr: target.url, base: report.range.base, head: pr.head.sha,
     organizationRevision: report.organization?.revision ?? null,
     findings: report.accepted, dropped: report.summary.rejected,
-    confidence: options.confidence, context, stamp: options.stamp
+    confidence: options.confidence, context, approve: options.approve
   }
-  const body = renderComment(request, target.repository)
-  if (Buffer.byteLength(body, "utf8") > maxCommentBytes) {
-    return yield* fail("comment_too_large", `Review comment exceeds ${maxCommentBytes.toLocaleString("en-US")} bytes. Shorten findings or context before publishing.`)
-  }
-  const result = { formatVersion: 1 as const, pr: target.url, range: report.range, organization: report.organization, summary: report.summary, confidence: options.confidence, body }
-  if (options.dryRun) return { ...result, action: "dry-run" as const, commentUrl: null, postedBy: null, stamp: null }
+  const rendered = renderReview(request, target.repository, patches)
+  const tooLarge = oversized(rendered)
+  if (tooLarge !== undefined) return yield* fail("comment_too_large", `${tooLarge} Shorten findings or context before publishing.`)
+  const result = { formatVersion: 1 as const, pr: target.url, range: report.range, organization: report.organization, summary: report.summary, confidence: options.confidence, body: rendered.body, comments: rendered.comments }
+  if (options.dryRun) return { ...result, action: "dry-run" as const, reviewUrl: null, postedBy: null, approval: null }
   const posted = yield* send(request)
-  return { ...result, action: posted.comment.action, commentUrl: posted.comment.url, postedBy: posted.postedBy, stamp: posted.stamp }
+  return { ...result, action: posted.review.action, reviewUrl: posted.review.url, postedBy: posted.postedBy, approval: posted.approval }
 })

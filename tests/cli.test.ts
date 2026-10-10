@@ -90,13 +90,13 @@ test("context resolves immutable commits and provides exact patches and policy",
   assert.deepEqual(result.files[0]?.skills, ["correctness", "security"])
 })
 
-test("review commands accept stamp configuration without weakening review policy", (t) => {
+test("review commands accept approve configuration without weakening review policy", (t) => {
   const { repo, context, check, run } = fixture(t)
-  configure(repo, { skills: ["security"], stamp: { enabled: true, denyPaths: ["infra/**"], maxChangedLines: 100 } })
+  configure(repo, { skills: ["security"], approve: { enabled: true, denyPaths: ["infra/**"], maxChangedLines: 100 } })
   assert.deepEqual(context().config.skills, ["security"])
   assert.equal(check([]).summary.accepted, 0)
-  for (const stamp of [{ enabled: "yes" }, { maxChangedLines: 0 }, { unknownOption: true }, { service: "https://benedict.example.invalid" }]) {
-    configure(repo, { stamp })
+  for (const config of [{ approve: { enabled: "yes" } }, { approve: { maxChangedLines: 0 } }, { approve: { unknownOption: true } }, { approve: { service: "https://benedict.example.invalid" } }, { stamp: { enabled: true } }]) {
+    configure(repo, config)
     assert.equal(run("context").status, 2)
   }
 })

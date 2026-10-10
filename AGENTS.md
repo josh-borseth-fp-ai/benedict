@@ -10,8 +10,8 @@ The project is pre-production with no users. Do not add backwards compatibility,
 
 Persisted review state is JSON under `.benedict/`, never YAML:
 
-- `.benedict/config.json`: repository policy, knowledge, organization source, and stamp settings (`ConfigFile`).
+- `.benedict/config.json`: repository policy, knowledge, organization source, and approve settings (`ConfigFile`).
 - `.benedict/organization.json`: organization manifest with `defaults`, `required`, and `knowledge` (`OrganizationManifest`).
 - `.benedict/knowledge.lock.json`: the pinned organization revision written by `benedict sync`.
 
-Path constants and schemas live in `src/model.ts`; import them rather than repeating paths. Repository policy, organization `defaults`, and `required` share field names (`skills`, `minimumSeverity`, `minimumConfidence`, `paths`, `rules`). The stamp workflow protects `.benedict/**`. After changing a config schema, run `npm run schemas` to regenerate `schemas/*.schema.json`.
+Path constants and schemas live in `src/model.ts`; import them rather than repeating paths. Repository policy, organization `defaults`, and `required` share field names (`skills`, `minimumSeverity`, `minimumConfidence`, `paths`, `rules`). The approve workflow protects `.benedict/**`. After changing a config schema, run `npm run schemas` to regenerate `schemas/*.schema.json`.

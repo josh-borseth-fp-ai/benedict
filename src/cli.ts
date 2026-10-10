@@ -122,9 +122,9 @@ const publishCommand = Command.make("publish", {
   findings: Argument.String("findings").pipe(Argument.withDescription("Draft findings JSON; revalidated before posting")),
   pr: Flag.String("pr").pipe(Flag.withDescription("Full https://github.com/OWNER/REPO/pull/NUMBER URL")),
   contextFile: Flag.String("context-file").pipe(Flag.optional, Flag.withDescription("Markdown file with useful review context")),
-  confidence: Flag.Int("confidence").pipe(Flag.withDescription("Overall merge confidence (1-5); stamping requires 4 or 5")),
-  stamp: Flag.Boolean("stamp").pipe(Flag.withDefault(false), Flag.withDescription("Also ask the Benedict GitHub App to approve a clean whole-PR review")),
-  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Render the exact comment without contacting the Benedict service; reads PR metadata"))
+  confidence: Flag.Int("confidence").pipe(Flag.withDescription("Overall merge confidence (1-5); approval requires 4 or 5")),
+  approve: Flag.Boolean("approve").pipe(Flag.withDefault(false), Flag.withDescription("Also ask the Benedict GitHub App to approve a clean whole-PR review")),
+  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Render the exact review without contacting the Benedict service; reads the PR and its diff"))
 }, Effect.fn(function*(flags) {
   const result = yield* publishReview({
     findings: flags.findings,
@@ -135,16 +135,17 @@ const publishCommand = Command.make("publish", {
     config: Option.getOrUndefined(flags.config),
     contextFile: Option.getOrUndefined(flags.contextFile),
     confidence: flags.confidence,
-    stamp: flags.stamp,
+    approve: flags.approve,
     dryRun: flags.dryRun
   })
-  const stamp = result.stamp === null ? [] : [result.stamp.action === "refused"
-    ? `stamp refused (${result.stamp.code}): ${result.stamp.message}`
-    : `stamp ${result.stamp.action}: ${result.stamp.url}`]
-  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : [`${result.action}: ${result.commentUrl ?? result.pr}`, ...stamp, "", result.body].join("\n"))
-  // A requested stamp that was refused still published the review; exit 1 tells the agent to request human review.
-  yield* Effect.sync(() => { process.exitCode = result.stamp?.action === "refused" ? 1 : 0 })
-})).pipe(Command.withDescription("Post validated findings and context as the Benedict GitHub App, and optionally stamp the PR."))
+  const approval = result.approval === null ? [] : [result.approval.action === "refused"
+    ? `approval refused (${result.approval.code}): ${result.approval.message}`
+    : `approval ${result.approval.action}: ${result.approval.url}`]
+  const comments = result.comments.map((comment) => `--- ${comment.path}:${comment.startLine === comment.line ? comment.line : `${comment.startLine}-${comment.line}`} ---\n${comment.body}`)
+  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) : [`${result.action}: ${result.reviewUrl ?? result.pr}`, ...approval, "", result.body, ...comments].join("\n"))
+  // A requested approval that was refused still published the review; exit 1 tells the agent to request human review.
+  yield* Effect.sync(() => { process.exitCode = result.approval?.action === "refused" ? 1 : 0 })
+})).pipe(Command.withDescription("Post validated findings and context as a Benedict GitHub App review, and optionally approve the PR."))
 
 const serveCommand = Command.make("serve", {
   host: Flag.String("host").pipe(Flag.withDefault("127.0.0.1")),

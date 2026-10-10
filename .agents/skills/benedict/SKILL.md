@@ -1,6 +1,6 @@
 ---
 name: benedict
-description: Review a Git diff for real correctness and security defects, assess merge confidence, and publish AI-labeled findings, architecture diagrams, and UI evidence for GitHub PRs. Use when asked to review a change, commit, branch, pull request, or worktree, or to review and stamp a PR.
+description: Review a Git diff for real correctness and security defects, assess merge confidence, and publish AI-labeled findings, architecture diagrams, and UI evidence for GitHub PRs. Use when asked to review a change, commit, branch, pull request, or worktree, or to review and approve a PR.
 ---
 
 # Benedict
@@ -11,7 +11,7 @@ You are the reviewer. This session is already the agent, so do not launch anothe
 
 Default base is `HEAD~1` and head is `HEAD`. Use the range the user names. For a worktree review, use `--worktree` with base `HEAD` unless the user names another base; this includes staged, unstaged, and untracked files.
 
-For a GitHub PR, run `benedict context --pr <PR URL>`. It resolves the PR's merge base and current head with `gh`, fetches missing commits, and reviews that whole range unless the user selects a narrower `--base`. Read the PR workflow in [references/cli.md](references/cli.md). Keep the returned `range.base` and `range.head` hashes for checking, publishing and stamping.
+For a GitHub PR, run `benedict context --pr <PR URL>`. It resolves the PR's merge base and current head with `gh`, fetches missing commits, and reviews that whole range unless the user selects a narrower `--base`. Read the PR workflow in [references/cli.md](references/cli.md). Keep the returned `range.base` and `range.head` hashes for checking, publishing and approval.
 
 ## Gather
 
@@ -104,27 +104,27 @@ Omit anything you are guessing about. An empty result is a valid review.
 
 For a GitHub PR review, publish accepted findings and useful review context with `benedict publish`, unless the user asks for a local-only review. Use the explicit PR URL and the same resolved base, head, and config used for investigation. For a local diff, publish only when the user supplies a PR destination. Publishing requires a committed review of the current PR head.
 
-You do the review and all reasoning locally. The CLI revalidates drafts and sends the validated review to the organization's Benedict service. The service posts it as the Benedict GitHub App (`benedict[bot]`), labels it as AI-generated, and updates the app's one marked comment on the PR. The service does not run a model. Keep those mechanics in the CLI. Pass the overall score as `--confidence N`; the comment shows it. For every PR review, write the score's rationale and the fenced Mermaid architecture diagram to a temporary Markdown file outside the reviewed tree and pass `--context-file`. Do not repeat the score in that file. For UI changes, include GitHub-hosted media URLs or links to the PR evidence, what was demonstrated, the captured head, and any capture/upload gaps. Upload media separately using the [UI evidence workflow](references/ui-evidence.md); `benedict publish` preserves Markdown links but does not upload local files. Include useful context such as verified behavior, checks run, and concrete coverage limits. Keep the rationale, diagram, and UI evidence in Markdown rather than adding fields to finding JSON. Share relevant summaries; omit secrets, raw logs, and unrelated conversation. Include the rationale and diagram even when no findings survive.
+You do the review and all reasoning locally. The CLI revalidates drafts and sends the validated review to the organization's Benedict service. The service posts it as the Benedict GitHub App (`benedict[bot]`), labels it as AI-generated, and submits it as a new GitHub review: each accepted finding becomes its own inline comment on the lines it cites, and the summary carries the score and context. The service does not run a model. Keep those mechanics in the CLI. Pass the overall score as `--confidence N`; the summary shows it. For every PR review, write the score's rationale and the fenced Mermaid architecture diagram to a temporary Markdown file outside the reviewed tree and pass `--context-file`. Do not repeat the score in that file. For UI changes, include GitHub-hosted media URLs or links to the PR evidence, what was demonstrated, the captured head, and any capture/upload gaps. Upload media separately using the [UI evidence workflow](references/ui-evidence.md); `benedict publish` preserves Markdown links but does not upload local files. Include useful context such as verified behavior, checks run, and concrete coverage limits. Keep the rationale, diagram, and UI evidence in Markdown rather than adding fields to finding JSON. Share relevant summaries; omit secrets, raw logs, and unrelated conversation. Include the rationale and diagram even when no findings survive.
 
 Publishing needs `BENEDICT_SERVICE_URL` and `BENEDICT_SERVICE_KEY` in the user's environment, and the app installed on the repository. The CLI owns authentication; do not print or inspect the key. `gh` is only used to read the PR.
 
-Use `--dry-run --format text` when you need to inspect the exact comment; it does not contact the service. Report the returned comment URL after success. On a stale PR, review the new range before publishing. After an uncertain service error, rerunning the same command is safe: an unchanged comment is not rewritten and an existing approval is detected. If publishing fails or the CLI is unavailable, deliver the local review and clearly state that GitHub publication did not complete.
+Use `--dry-run --format text` when you need to inspect the exact review and inline comments; it does not contact the service. Report the returned review URL after success. On a stale PR, review the new range before publishing. After an uncertain service error, rerunning the same command is safe: an identical review is not posted again and an existing approval is detected. If publishing fails or the CLI is unavailable, deliver the local review and clearly state that GitHub publication did not complete.
 
-## Stamp
+## Approve
 
-Stamp when the user asks you to review and stamp a GitHub PR, or when the repository's agent instructions (for example `AGENTS.md`) require a review and stamp for its PRs. A stamp is a GitHub approval from the organization's Benedict GitHub App. It is outward-facing and carries AI attribution.
+Request approval when the user asks you to review and approve a GitHub PR, or when the repository's agent instructions (for example `AGENTS.md`) require a review and approval for its PRs. The approval comes from the organization's Benedict GitHub App. It is outward-facing and carries AI attribution.
 
-Review the whole current PR from its merge base through its head. Choose the score before deciding whether to stamp, and never raise it to qualify. If there are no accepted findings and the score is 4 or 5, add `--stamp` to the publish command:
+Review the whole current PR from its merge base through its head. Choose the score before deciding whether to request approval, and never raise it to qualify. If there are no accepted findings and the score is 4 or 5, add `--approve` to the publish command:
 
 ```sh
 benedict publish /tmp/findings.json --repo /path/to/repository \
   --pr https://github.com/ORG/REPO/pull/123 \
   --base <resolved-merge-base> --head <reviewed-head> \
-  --context-file /tmp/review-context.md --confidence N --stamp
+  --context-file /tmp/review-context.md --confidence N --approve
 ```
 
-With accepted findings or a score below 4, publish without `--stamp`, then report the review and request human review.
+With accepted findings or a score below 4, publish without `--approve`, then report the review and request human review.
 
-The service posts the review first, then checks the stamp conditions: zero accepted findings, confidence of at least 4/5, a non-draft PR, the whole current PR range, `stamp.enabled` on the base branch, protected paths and the size limit. It then approves the exact reviewed commit as the Benedict app. See [references/stamp.md](references/stamp.md) for setup, outputs and failure handling.
+The service checks the approval conditions: zero accepted findings, confidence of at least 4/5, a non-draft PR, the whole current PR range, `approve.enabled` on the base branch, protected paths and the size limit. When they pass, it submits the review as an approval of the exact reviewed commit from the Benedict app. See [references/approve.md](references/approve.md) for setup, outputs and failure handling.
 
-Report the returned approval URL. If the stamp is refused, the review is still published: report the reason and request human review. Never use a direct `gh pr review --approve` call to bypass this workflow.
+Report the returned approval URL. If approval is refused, the review is still published: report the reason and request human review. Never use a direct `gh pr review --approve` call to bypass this workflow.
