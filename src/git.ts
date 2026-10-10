@@ -102,3 +102,13 @@ export const changedLines = (patch: string): ReadonlyArray<number> => {
   }
   return [...new Set(lines)].sort((a, b) => a - b)
 }
+
+/** Reads a regular file from a commit without checking it out. Absent files return null; links and directories fail. */
+export const readCommittedFile = Effect.fn("Git.readCommittedFile")(function*(cwd: string, revision: string, file: string, code: string) {
+  const git = yield* Git
+  const entry = yield* git.run(cwd, ["ls-tree", "-z", "--full-tree", revision, "--", file])
+  if (entry === "") return null
+  const match = /^(?:100644|100755) blob ([a-f0-9]+)\t[^\0]+\0$/.exec(entry)
+  if (!match) return yield* new ReviewError({ code, message: `${file} must be a regular file at ${revision}.` })
+  return yield* git.run(cwd, ["cat-file", "blob", match[1]!])
+})

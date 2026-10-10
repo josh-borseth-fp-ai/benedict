@@ -1,6 +1,6 @@
 ---
 name: benedict
-description: Review a Git diff for real correctness and security defects, assess merge confidence, and publish AI-labeled findings, architecture diagrams, and UI evidence for GitHub PRs. Use when asked to review a change, commit, branch, pull request, or worktree, or to review and approve a PR.
+description: Review a Git diff for real defects using review skills, assess merge confidence, decide whether to approve, and publish AI-labeled findings, architecture diagrams, and UI evidence for GitHub PRs. Use when asked to review a change, commit, branch, pull request, or worktree, or to review and approve a PR.
 ---
 
 # Benedict
@@ -15,49 +15,34 @@ For a GitHub PR, run `benedict context --pr <PR URL>`. It resolves the PR's merg
 
 ## Gather
 
-Run `benedict context --repo <repository>` with the selected range. Read [references/cli.md](references/cli.md) for flags and the finding JSON format. Use the returned patches and permitted lenses, and read source from the selected Git head for a commit review. Read each changed code file and related callers, callees, and tests when the diff is not enough to judge the change. Read `AGENTS.md`, `CLAUDE.md`, and `CODEOWNERS` when they exist. Skip binary files, deleted source, symlinks, and submodules.
+Run `benedict context --repo <repository>` with the selected range. Read [references/cli.md](references/cli.md) for flags and the finding JSON format. Read source from the selected Git head for a commit review. Read each changed code file and related callers, callees, and tests when the diff is not enough to judge the change. Read `AGENTS.md`, `CLAUDE.md`, and `CODEOWNERS` when they exist. Skip binary files, deleted source, symlinks, and submodules.
 
-The CLI reads `.benedict/config.json` from the repository. Review configuration is JSON only. For each changed file, apply only the lenses permitted by the returned policy. Unmatched paths use the global `skills` list, which defaults to correctness and security. An empty list disables optional checks; organization-required lenses still apply. Fix input or configuration errors before relying on a check result.
+## Review skills
 
-Read the `config.knowledge` documents returned by context. They identify repository and organization scope. Organization defaults can be overridden by repository settings; organization-required lenses, thresholds, and rules remain applicable. Include the organization revision in the report when present. See [references/knowledge.md](references/knowledge.md) when knowledge or policy resolution fails. A missing required lock/cache prevents validated review; do not silently omit organization guidance or use a different revision.
+Review skills say what to look for. Context lists every skill with its name, description and scope, and each changed file lists the skills that apply to it. Benedict ships `correctness` and `security`; the repository and its organization can add more. See [references/skills.md](references/skills.md).
 
-```json
-{
-  "skills": ["correctness", "security"],
-  "minimumSeverity": "medium",
-  "minimumConfidence": 0.7,
-  "paths": [{ "pattern": "api/**", "skills": ["security"] }],
-  "rules": ["Do not report style-only issues."]
-}
-```
+For each skill that applies to a changed file, run `benedict skill <name> --repo <repository> --base <range.base>` and follow its instructions for those files. Skills come from the review's base commit, so a change is always reviewed under the skills it started from. Every finding names the one skill it falls under, and that skill must apply to the finding's file.
 
-`api/**` matches `api/v1/user.ts` and does not match `web/api/user.ts`. `*.ts` does not match `src/user.ts`. When several rules match, an optional lens applies only if the global `skills` list includes it and a matching rule lists it. Organization-required lenses apply regardless of path rules.
-
-## Correctness
-
-Broken control flow, incorrect assumptions, null or undefined cases, state inconsistencies, missing error handling, edge cases, and regressions caused by this diff.
-
-## Security
-
-Auth or authz mistakes, injection, secret exposure, unsafe deserialization, trust-boundary violations, and insecure defaults caused by this diff.
+When the organization is configured, include its revision in the report. If context fails because organization skills are unavailable, see [references/skills.md](references/skills.md); do not run setup or `sync --update` during a review, and do not review without the organization's skills.
 
 ## Rules
 
-Follow `rules` from the review config. When the file is missing:
-
 - Do not report style-only issues.
-- Only report a real defect or a meaningful risk.
+- Only report a real defect or a meaningful risk, and omit anything you are guessing about.
 - Prefer evidence from the repository over assumptions.
+- An empty result is a valid review.
 
 ## Report
 
 State the base and head. For each finding that survives the check, give severity, skill, file, line range, title, explanation, a quote from the repository, and confidence from 0 to 1. Say how many drafts you dropped. If none survive, say the review found nothing that cleared the bar.
 
+Severity is `low`, `medium`, `high` or `critical`, and tells the reader how much the finding matters. A finding's confidence says how sure you are that the defect is real. Neither filters findings: decide what is worth reporting yourself.
+
 Include an overall confidence score in every review, and an architecture diagram in every PR review, including local-only PR reviews and reviews with no accepted findings.
 
 For PRs with meaningful visible UI changes, also check screenshots and a focused video of the changed UI. Follow [references/ui-evidence.md](references/ui-evidence.md) to reuse current evidence, request capture and upload from the implementation agent, or capture it with browser/computer-use tools when appropriate. Choose the demonstration from the PR's purpose and reviewed diff. PRs without visible UI changes do not need media.
 
-Keep the reviewer read-only and do not launch another agent. Hand missing evidence back to an existing implementation agent through an available handoff mechanism; when no mechanism is available, include a concrete capture request in the review. Missing media is a verification gap, not automatically a correctness/security finding. Local-only reviews must remain local.
+Keep the reviewer read-only and do not launch another agent. Hand missing evidence back to an existing implementation agent through an available handoff mechanism; when no mechanism is available, include a concrete capture request in the review. Missing media is a verification gap, not automatically a finding. Local-only reviews must remain local.
 
 ## Overall confidence
 
@@ -71,7 +56,7 @@ Write **Confidence: N/5**, where N is an integer from 1 to 5 expressing confiden
 | 4/5 | Likely safe to merge; remaining concerns or verification gaps are minor. |
 | 5/5 | Strong supporting evidence: relevant paths were reviewed, appropriate verification is complete, and no substantive concerns remain. |
 
-Choose the score after checking findings. An empty finding list or a passing `benedict check` does not automatically earn 5/5. Do not turn rejected drafts or guesses into claims in the rationale. This overall score is separate from each finding's 0–1 confidence and the configured `minimumConfidence`; those continue to measure confidence in the individual defect.
+Choose the score after checking findings. An empty finding list or a passing `benedict check` does not automatically earn 5/5. Do not turn rejected drafts or guesses into claims in the rationale.
 
 ## PR architecture diagram
 
@@ -83,28 +68,24 @@ Prefer a simple `flowchart` or `sequenceDiagram` with quoted labels that GitHub 
 
 ## Check
 
-Write drafts to a JSON file outside the reviewed tree, then run `benedict check <findings.json>` using the resolved commit hashes returned by `context`, or the same base and `--worktree`. Report only the `accepted` findings and count rejected drafts. Exit code 1 means the report contains rejected drafts and is still usable; exit code 2 means validation failed. Rejection reasons may guide a correction, but keep thresholds and evidence requirements intact. A passing check establishes structural validity and source evidence; you must still verify the defect.
+Write drafts to a JSON file outside the reviewed tree, then run `benedict check <findings.json>` using the resolved commit hashes returned by `context`, or the same base and `--worktree`. Report only the `accepted` findings and count rejected drafts. Exit code 1 means the report contains rejected drafts and is still usable; exit code 2 means validation failed. Rejection reasons may guide a correction, but keep evidence requirements intact. A passing check establishes structural validity and source evidence; you must still verify the defect.
 
-If the CLI is unavailable, gather the range with Git and apply the checks below manually. State that deterministic validation was not run. When the repository declares organization knowledge, also disclose any unavailable organization guidance.
+If the CLI is unavailable, gather the range with Git and apply the checks below manually. State that deterministic validation was not run, and that repository and organization skills were unavailable.
 
-Drop a draft when any of these are true:
+The check drops a draft when any of these are true:
 
-- The file is outside the diff or is binary.
-- The skill is not allowed for that path.
+- The file is outside the diff, binary, deleted, or a link.
+- The skill does not apply to that file.
 - There is no explanation, or no quote from the repository.
 - The quote does not occur within the supplied line range in the reviewed version.
 - The line range is reversed or past the end of the file.
-- Severity is below the config `minimumSeverity`. Default is `medium`. Rank is low, medium, high, critical.
-- Confidence is below `minimumConfidence`. Default is 0.7.
-- A valid finding with the same file, start line, and title has equal or higher confidence. Keep the highest confidence and the first draft on a tie.
-
-Omit anything you are guessing about. An empty result is a valid review.
+- A valid finding with the same file, start line, and title has equal or higher confidence. The highest confidence wins, and the first draft wins a tie.
 
 ## GitHub
 
-For a GitHub PR review, publish accepted findings and useful review context with `benedict publish`, unless the user asks for a local-only review. Use the explicit PR URL and the same resolved base, head, and config used for investigation. For a local diff, publish only when the user supplies a PR destination. Publishing requires a committed review of the current PR head.
+For a GitHub PR review, publish accepted findings and useful review context with `benedict publish`, unless the user asks for a local-only review. Use the explicit PR URL and the same resolved base and head used for investigation. For a local diff, publish only when the user supplies a PR destination. Publishing requires a committed review of the current PR head.
 
-You do the review and all reasoning locally. The CLI revalidates drafts and posts the review as the organization's Benedict GitHub App (`benedict[bot]`), labels it as AI-generated, and submits it as a new GitHub review: each accepted finding becomes its own inline comment on the lines it cites, and the summary carries the score and context. Keep those mechanics in the CLI. Pass the overall score as `--confidence N`; the summary shows it. For every PR review, write the score's rationale and the fenced Mermaid architecture diagram to a temporary Markdown file outside the reviewed tree and pass `--context-file`. Do not repeat the score in that file. For UI changes, include GitHub-hosted media URLs or links to the PR evidence, what was demonstrated, the captured head, and any capture/upload gaps. Upload media separately using the [UI evidence workflow](references/ui-evidence.md); `benedict publish` preserves Markdown links but does not upload local files. Include useful context such as verified behavior, checks run, and concrete coverage limits. Keep the rationale, diagram, and UI evidence in Markdown rather than adding fields to finding JSON. Share relevant summaries; omit secrets, raw logs, and unrelated conversation. Include the rationale and diagram even when no findings survive.
+You do the review and all reasoning locally. The CLI revalidates drafts and posts the review as the organization's Benedict GitHub App (`benedict[bot]`), labels it as AI-generated, and submits it as a new GitHub review: each accepted finding becomes its own inline comment on the lines it cites, and the summary carries the score and context. Keep those mechanics in the CLI. Pass the overall score as `--confidence N` and your approval decision as `--decision`. For every PR review, write the score's rationale and the fenced Mermaid architecture diagram to a temporary Markdown file outside the reviewed tree and pass `--context-file`. Do not repeat the score in that file. For UI changes, include GitHub-hosted media URLs or links to the PR evidence, what was demonstrated, the captured head, and any capture/upload gaps. Upload media separately using the [UI evidence workflow](references/ui-evidence.md); `benedict publish` preserves Markdown links but does not upload local files. Include useful context such as verified behavior, checks run, and concrete coverage limits. Share relevant summaries; omit secrets, raw logs, and unrelated conversation. Include the rationale and diagram even when no findings survive.
 
 Publishing needs the Infisical CLI signed in (`infisical login`) with access to the Benedict project, and the app installed on the repository. The CLI reads the app credentials from Infisical itself; do not fetch, print or inspect them. `gh` is only used to read the PR.
 
@@ -112,19 +93,15 @@ Use `--dry-run --format text` when you need to inspect the exact review and inli
 
 ## Approve
 
-Request approval when the user asks you to review and approve a GitHub PR, or when the repository's agent instructions (for example `AGENTS.md`) require a review and approval for its PRs. The approval comes from the organization's Benedict GitHub App. It is outward-facing and carries AI attribution.
-
-Review the whole current PR from its merge base through its head. Choose the score before deciding whether to request approval, and never raise it to qualify. If there are no accepted findings and the score is 4 or 5, add `--approve` to the publish command:
+Every published PR review decides whether to approve. Once the review is done, ask yourself one question: is this PR safe to approve? Answer it as its own judgment. Findings and the confidence score inform it but do not decide it: you can approve a PR with minor findings, and decline one with none. Pass `--decision approve` when you judge it safe, and `--decision comment` otherwise:
 
 ```sh
 benedict publish /tmp/findings.json --repo /path/to/repository \
   --pr https://github.com/ORG/REPO/pull/123 \
   --base <resolved-merge-base> --head <reviewed-head> \
-  --context-file /tmp/review-context.md --confidence N --approve
+  --context-file /tmp/review-context.md --confidence N --decision approve
 ```
 
-With accepted findings or a score below 4, publish without `--approve`, then report the review and request human review.
+Review the whole current PR from its merge base through its head before approving. Explain the decision in the context file. The approval comes from the organization's Benedict GitHub App, is outward-facing, and carries AI attribution. See [references/approve.md](references/approve.md) for outputs and failure handling.
 
-The CLI checks the approval conditions: zero accepted findings, confidence of at least 4/5, a non-draft PR, the whole current PR range, `approve.enabled` on the base branch, protected paths and the size limit. When they pass, it submits the review as an approval of the exact reviewed commit from the Benedict app. See [references/approve.md](references/approve.md) for setup, outputs and failure handling.
-
-Report the returned approval URL. If approval is refused, the review is still published: report the reason and request human review. Never use a direct `gh pr review --approve` call to bypass this workflow.
+Report the returned approval URL. When you decide not to approve, or approval is refused, the review is still published: report why and request human review. Never use a direct `gh pr review --approve` call to bypass this workflow.

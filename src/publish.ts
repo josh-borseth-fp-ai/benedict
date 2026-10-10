@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Schema } from "effect"
 import { publishAsApp } from "./app-publish.js"
+import type { Decision } from "./app-publish.js"
 import { checkFindings, readFindings } from "./check.js"
 import { oversized, parsePullRequest, renderReview } from "./comment.js"
 import { collectSnapshot } from "./context.js"
@@ -17,10 +18,9 @@ export interface PublishOptions {
   readonly repo: string
   readonly base?: string
   readonly head?: string
-  readonly config?: string
   readonly contextFile?: string
   readonly confidence: number
-  readonly approve: boolean
+  readonly decision: Decision
   readonly dryRun: boolean
 }
 
@@ -48,7 +48,7 @@ export const publishReview = Effect.fn("Review.publish")(function*(options: Publ
     Effect.mapError(() => fail("range_error", "Cannot resolve the PR merge base locally. Run benedict context --pr to fetch the PR commits, or fetch them manually, before retrying."))
   )
   const base = options.base ?? (yield* resolveMergeBase)
-  const snapshot = yield* collectSnapshot({ repo: options.repo, base, head: options.head, config: options.config, worktree: false })
+  const snapshot = yield* collectSnapshot({ repo: options.repo, base, head: options.head, worktree: false })
   const report = yield* checkFindings(snapshot, drafts)
   if (report.range.head !== pr.head.sha) {
     return yield* fail("stale_review", `Reviewed head ${report.range.head} differs from PR head ${pr.head.sha}. Review the current PR head before publishing.`)
@@ -74,8 +74,8 @@ export const publishReview = Effect.fn("Review.publish")(function*(options: Publ
   const rendered = renderReview(review, target.repository, patches)
   const tooLarge = oversized(rendered)
   if (tooLarge !== undefined) return yield* fail("comment_too_large", `${tooLarge} Shorten findings or context before publishing.`)
-  const result = { formatVersion: 1 as const, pr: target.url, range: report.range, organization: report.organization, summary: report.summary, confidence: options.confidence, body: rendered.body, comments: rendered.comments }
+  const result = { formatVersion: 1 as const, pr: target.url, range: report.range, organization: report.organization, summary: report.summary, confidence: options.confidence, decision: options.decision, body: rendered.body, comments: rendered.comments }
   if (options.dryRun) return { ...result, action: "dry-run" as const, reviewUrl: null, postedBy: null, approval: null }
-  const posted = yield* publishAsApp({ ...review, ...target, rendered, approve: options.approve })
+  const posted = yield* publishAsApp({ ...review, ...target, rendered, decision: options.decision })
   return { ...result, action: posted.review.action, reviewUrl: posted.review.url, postedBy: posted.postedBy, approval: posted.approval }
 })

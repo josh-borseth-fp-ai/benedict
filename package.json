@@ -15,6 +15,7 @@
   "files": [
     "dist",
     ".agents/skills/benedict",
+    "review-skills",
     "schemas",
     "README.md"
   ],

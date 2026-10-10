@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/http"
 import { appJwt, AppGitHub } from "../src/app-github.js"
 import { publishAsApp } from "../src/app-publish.js"
+import type { Decision } from "../src/app-publish.js"
 import { hunkRanges, renderReview } from "../src/comment.js"
 import { ReviewError } from "../src/model.js"
 import type { Finding } from "../src/model.js"
@@ -24,12 +25,11 @@ const fail = (code: string) => new ReviewError({ code, message: code })
 const fixture = () => {
   const state = {
     installed: true,
-    pr: { state: "open", draft: false, head: { sha: head }, base: { sha: base }, changed_files: 2 },
-    config: JSON.stringify({ approve: { enabled: true } }) as string | undefined,
+    pr: { state: "open", head: { sha: head }, base: { sha: base } },
     files: [
-      { filename: "safe.ts", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-y\n+x" },
-      { filename: "other.ts", additions: 2, deletions: 0, patch: "@@ -10,3 +10,5 @@ ctx\n a\n+b\n+c\n d\n e" }
-    ] as Array<{ filename: string; additions: number; deletions: number; patch?: string; previous_filename?: string }>,
+      { filename: "safe.ts", patch: "@@ -1 +1 @@\n-y\n+x" },
+      { filename: "other.ts", patch: "@@ -10,3 +10,5 @@ ctx\n a\n+b\n+c\n d\n e" }
+    ],
     reviews: [] as ReviewRecord[],
     writes: [] as Write[],
     rejectApproval: false, loseReview: false, mutateAfterReviews: false
@@ -52,8 +52,6 @@ const fixture = () => {
       const compare = /\/compare\/([a-f0-9]+)\.\.\.([a-f0-9]+)$/.exec(endpoint)
       // The PR base is its merge base.
       if (compare) return Effect.succeed({ merge_base_commit: { sha: compare[1] } })
-      if (endpoint.includes("/contents/")) return state.config !== undefined && endpoint.includes("/contents/.benedict/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(fail("github_not_found"))
-      if (endpoint.includes("/files?")) return Effect.succeed(state.files)
       if (endpoint.includes("/reviews?")) {
         if (state.mutateAfterReviews) state.pr.head.sha = later
         const page = Number(new URLSearchParams(endpoint.split("?")[1]).get("page"))
@@ -62,11 +60,11 @@ const fixture = () => {
       return Effect.succeed(structuredClone(state.pr))
     })
   })
-  const request = { base, head, organizationRevision: null, findings: [] as Finding[], dropped: 2, confidence: 4, context: "Verified the changed path.", approve: true }
+  const request = { base, head, organizationRevision: null, findings: [] as Finding[], dropped: 2, confidence: 4, context: "Verified the changed path.", decision: "approve" as Decision }
   // The CLI renders the review from GitHub's PR patches before posting it.
   const review = () => ({
     ...request, repository: "acme/project", number: 7, url: prUrl,
-    rendered: renderReview(request, "acme/project", new Map(state.files.flatMap(file => file.patch === undefined ? [] : [[file.filename, file.patch] as const])))
+    rendered: renderReview(request, "acme/project", new Map(state.files.map(file => [file.filename, file.patch] as const)))
   })
   const run = <A, E>(effect: Effect.Effect<A, E, AppGitHub>) => Effect.runPromise(effect.pipe(Effect.provideService(AppGitHub, gh)))
   const publish = () => run(publishAsApp(review()))
@@ -92,7 +90,7 @@ test("the app approves a clean review in one review at the reviewed commit and i
   assert.match(approval!.body.body, /Overall confidence: \*\*4\/5\*\*/)
   assert.match(approval!.body.body, /Benedict GitHub App posted it/)
   assert.match(approval!.body.body, /Verified the changed path/)
-  assert.match(approval!.body.body, /Benedict — automated approval/)
+  assert.match(approval!.body.body, /Benedict — automated approval\.\*\* The AI reviewer judged commit `b{40}` safe to approve/)
   const again = await f.publish()
   assert.equal(again.review.action, "unchanged")
   assert.equal(again.approval?.action, "already-approved")
@@ -101,7 +99,7 @@ test("the app approves a clean review in one review at the reviewed commit and i
 
 test("each finding becomes its own inline comment, and findings off the diff stay in the summary", async () => {
   const f = fixture()
-  f.request.approve = false
+  f.request.decision = "comment"
   f.request.findings.push(
     finding,
     { ...finding, file: "other.ts", startLine: 11, endLine: 12, title: "Range" },
@@ -128,7 +126,7 @@ test("each finding becomes its own inline comment, and findings off the diff sta
 
 test("every changed review is posted as a new review; an identical rerun is not", async () => {
   const f = fixture()
-  f.request.approve = false
+  f.request.decision = "comment"
   f.state.reviews.push({ state: "COMMENTED", commit_id: head, html_url: `${prUrl}#pullrequestreview-1`, body: "Human review", user: { login: "person" } })
   assert.equal((await f.publish()).review.action, "created")
   assert.equal((await f.publish()).review.action, "unchanged")
@@ -142,7 +140,7 @@ test("every changed review is posted as a new review; an identical rerun is not"
 
 test("pagination finds the app's review beyond the first hundred", async () => {
   const f = fixture()
-  f.request.approve = false
+  f.request.decision = "comment"
   await f.publish()
   const own = f.state.reviews.pop()!
   for (let id = 1; id <= 100; id++) f.state.reviews.push({ state: "COMMENTED", commit_id: head, html_url: `${prUrl}#pullrequestreview-${id}`, body: "Discussion", user: { login: "person" } })
@@ -151,22 +149,21 @@ test("pagination finds the app's review beyond the first hundred", async () => {
   assert.equal(f.state.writes.length, 1)
 })
 
+test("the reviewer's decision approves regardless of findings and score", async () => {
+  const f = fixture()
+  f.request.findings.push(finding)
+  f.request.confidence = 2
+  const result = await f.publish()
+  assert.equal(result.approval?.action, "approved")
+  const [write] = f.state.writes
+  assert.equal(write!.body.event, "APPROVE")
+  assert.equal(write!.body.comments.length, 1)
+  assert.match(write!.body.body, /Overall confidence: \*\*2\/5\*\*/)
+})
+
 test("approval refusals still publish the review and report the reason", async () => {
   const refusals: Array<[string, (f: ReturnType<typeof fixture>) => void]> = [
-    ["findings", f => { f.request.findings.push(finding) }],
-    ["low_confidence", f => { f.request.confidence = 3 }],
-    ["draft", f => { f.state.pr.draft = true }],
     ["partial_review", f => { f.request.base = later }],
-    ["approve_disabled", f => { f.state.config = JSON.stringify({ approve: { enabled: false } }) }],
-    ["approve_disabled", f => { f.state.config = undefined }],
-    ["config_error", f => { f.state.config = JSON.stringify({ stamp: { enabled: true } }) }],
-    ["config_error", f => { f.state.config = "approve:\n  enabled: true\n" }],
-    ["protected_path", f => { f.state.files[0]!.previous_filename = ".agents/skills/benedict/SKILL.md" }],
-    ["protected_path", f => { f.state.files[0]!.filename = ".benedict/knowledge.lock.json" }],
-    ["protected_path", f => { f.state.config = JSON.stringify({ approve: { enabled: true, denyPaths: ["safe.ts"] } }) }],
-    ["size_limit", f => { f.state.files[0]!.additions = 398 }],
-    ["coverage", f => { delete f.state.files[0]!.patch }],
-    ["coverage", f => { f.state.pr.changed_files = 3 }],
     ["write_rejected", f => { f.state.rejectApproval = true }]
   ]
   for (const [code, mutate] of refusals) {
@@ -218,24 +215,24 @@ test("a PR change between validation and the review write fails closed", async (
 })
 
 test("an uncertain review write fails the request, and rerunning finds the review instead of writing again", async () => {
-  for (const approve of [true, false]) {
+  for (const decision of ["approve", "comment"] as const) {
     const f = fixture()
-    f.request.approve = approve
+    f.request.decision = decision
     f.state.loseReview = true
     assert.equal((await f.refuse()).code, "write_uncertain")
     f.state.loseReview = false
     const result = await f.publish()
     assert.equal(result.review.action, "unchanged")
-    assert.equal(result.approval?.action ?? null, approve ? "already-approved" : null)
+    assert.equal(result.approval?.action ?? null, decision === "approve" ? "already-approved" : null)
     assert.equal(f.state.writes.length, 1)
   }
 })
 
 test("a later approval request approves even when the same review was posted without one", async () => {
   const f = fixture()
-  f.request.approve = false
+  f.request.decision = "comment"
   await f.publish()
-  f.request.approve = true
+  f.request.decision = "approve"
   const result = await f.publish()
   assert.equal(result.approval?.action, "approved")
   assert.deepEqual(f.state.reviews.map(review => review.state), ["COMMENTED", "APPROVED"])

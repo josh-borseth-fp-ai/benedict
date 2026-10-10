@@ -1,8 +1,6 @@
 import { Effect, FileSystem, Schema } from "effect"
 import { Finding, ReviewError, sourceLines } from "./model.js"
-import type { CheckReport, RejectionReason, Severity, Snapshot } from "./model.js"
-
-const rank: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 }
+import type { CheckReport, RejectionReason, Snapshot } from "./model.js"
 
 export const readFindings = Effect.fn("Review.readFindings")(function*(filename: string) {
   const fs = yield* FileSystem.FileSystem
@@ -46,7 +44,7 @@ export const checkFindings = Effect.fn("Review.checkFindings")(function*(snapsho
     } else if (!file.reviewable) {
       fail("unsupported_file", "The file is deleted, a symlink, a submodule, or another unsupported file type.")
     } else {
-      if (!file.skills.includes(finding.skill)) fail("skill_not_allowed", `The ${finding.skill} lens is not allowed for this path.`)
+      if (!file.skills.includes(finding.skill)) fail("skill_not_applicable", `The ${finding.skill} skill does not apply to this file. Use one of: ${file.skills.join(", ") || "none"}.`)
       if (finding.startLine > finding.endLine || finding.endLine > file.lineCount) {
         fail("invalid_range", `Line range must be ordered and inside the reviewed file (${file.lineCount} lines).`)
       } else {
@@ -58,8 +56,6 @@ export const checkFindings = Effect.fn("Review.checkFindings")(function*(snapsho
         }
       }
     }
-    if (rank[finding.severity] < rank[context.config.minimumSeverity]) fail("below_severity", `Minimum severity is ${context.config.minimumSeverity}.`)
-    if (finding.confidence < context.config.minimumConfidence) fail("below_confidence", `Minimum confidence is ${context.config.minimumConfidence}.`)
     candidates.push({ index, finding, reasons })
   }
 
@@ -84,7 +80,7 @@ export const checkFindings = Effect.fn("Review.checkFindings")(function*(snapsho
     formatVersion: 1,
     repository: context.repository,
     range: context.range,
-    organization: context.config.organization,
+    organization: context.organization,
     accepted,
     rejected,
     summary: { accepted: accepted.length, rejected: rejected.length }

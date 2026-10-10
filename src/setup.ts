@@ -4,15 +4,13 @@ import { stripVTControlCharacters } from "node:util"
 import { Effect, FileSystem, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { readRepositoryConfig } from "./config.js"
-import { readLock, readRepositoryKnowledge, resolveOrganization, reviewDirectory, writeAtomically, writeLock } from "./knowledge.js"
 import { ReviewError, configPath } from "./model.js"
-import type { ConfigFile, KnowledgeLock } from "./model.js"
-import { resolvePolicy } from "./policy.js"
+import type { ConfigFile, OrganizationLock } from "./model.js"
+import { readLock, resolveOrganization, reviewDirectory, writeAtomically, writeLock } from "./organization.js"
 import { prepareOrganization, repositoryRoot } from "./sync.js"
 
 export interface SetupOptions {
   readonly repo: string
-  readonly config?: string
   readonly organization?: string
   readonly ref?: string
   readonly project: boolean
@@ -75,14 +73,14 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
   }
   const path = yield* Path.Path
   const location = yield* repositoryRoot(options.repo).pipe(Effect.result)
-  if (location._tag === "Failure" && (options.project || options.organization !== undefined || options.config !== undefined)) {
+  if (location._tag === "Failure" && (options.project || options.organization !== undefined)) {
     return yield* new ReviewError({ code: "setup_error", message: "Project installation and organization setup require a Git repository. Run inside a project or pass --repo." })
   }
   const root = location._tag === "Success" ? location.success : null
-  let lock: KnowledgeLock | null = null
+  let lock: OrganizationLock | null = null
   let declaration: { source: string | null; decoded: ConfigFile } | null = null
   if (root !== null) {
-    const local = yield* readRepositoryConfig(root, options.config)
+    const local = yield* readRepositoryConfig(root)
     let decoded = local.decoded
     if (options.organization !== undefined) {
       const requested = { source: options.organization, ref: options.ref ?? local.decoded.organization?.ref ?? "HEAD" }
@@ -97,15 +95,7 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
         declaration = { source: local.source, decoded }
       }
     }
-    if (decoded.organization) {
-      lock = (yield* prepareOrganization(root, decoded, false)).lock
-    } else {
-      yield* readRepositoryKnowledge(root, decoded.knowledge ?? [])
-      yield* Effect.try({
-        try: () => resolvePolicy(decoded, local.source, null),
-        catch: (error) => error instanceof ReviewError ? error : new ReviewError({ code: "config_error", message: String(error) })
-      })
-    }
+    if (decoded.organization) lock = (yield* prepareOrganization(root, decoded, false)).lock
   }
   if (!options.skipSkills) yield* installSkill(root ?? path.resolve(options.repo), options)
   if (root !== null) {

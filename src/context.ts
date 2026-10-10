@@ -1,9 +1,26 @@
 import { Effect, FileSystem, Path } from "effect"
-import { loadConfig, skillsForPath } from "./config.js"
+import { readCommittedConfig } from "./config.js"
 import { binaryPaths, changedLines, Git, parseRawDiff } from "./git.js"
 import type { RawChange } from "./git.js"
 import { ReviewError, sourceLines } from "./model.js"
 import type { ChangedFile, ReviewOptions, Snapshot } from "./model.js"
+import { loadOrganization } from "./organization.js"
+import { combineSkills, readBuiltinSkills, readCommittedSkills, skillsForPath, summarize } from "./skills.js"
+
+/**
+ * Loads the review skills committed at the base: built-in, organization and repository skills.
+ * A change is reviewed under the policy it starts from, so it cannot rewrite its own review.
+ */
+export const loadReviewSkills = Effect.fn("Review.loadSkills")(function*(root: string, base: string) {
+  const config = yield* readCommittedConfig(root, base)
+  const organization = config.organization === undefined ? null : yield* loadOrganization(root, base, config.organization)
+  const skills = yield* combineSkills(
+    yield* readBuiltinSkills(),
+    organization?.skills ?? [],
+    yield* readCommittedSkills(root, base, "repository")
+  )
+  return { organization: organization?.lock ?? null, skills }
+})
 
 export const collectSnapshot = Effect.fn("Review.collectSnapshot")(function*(options: ReviewOptions) {
   if (options.worktree && options.head !== undefined) {
@@ -30,7 +47,8 @@ export const collectSnapshot = Effect.fn("Review.collectSnapshot")(function*(opt
     try: () => ({ changes: parseRawDiff(raw), binaries: binaryPaths(numstat) }),
     catch: (error) => new ReviewError({ code: "git_error", message: String(error) })
   })
-  const config = yield* loadConfig(root, options.config)
+  const { organization, skills: loaded } = yield* loadReviewSkills(root, base)
+  const skills = loaded.map(summarize)
   const physicalRoot = yield* fs.realPath(root)
   const sources = new Map<string, string>()
 
@@ -65,7 +83,7 @@ export const collectSnapshot = Effect.fn("Review.collectSnapshot")(function*(opt
       reviewable: reviewable && content !== null && !binary,
       lineCount: content === null || binary ? 0 : sourceLines(content).length,
       changedLines: changedLines(patch),
-      skills: skillsForPath(change.path, config),
+      skills: skillsForPath(change.path, skills),
       patch
     } satisfies ChangedFile
   })
@@ -89,7 +107,7 @@ export const collectSnapshot = Effect.fn("Review.collectSnapshot")(function*(opt
         reviewable: content !== null && !binary,
         lineCount: lines.length,
         changedLines: lines.map((_, index) => index + 1),
-        skills: skillsForPath(file, config),
+        skills: skillsForPath(file, skills),
         patch: lines.length === 0 ? "" : `--- /dev/null\n+++ ${JSON.stringify(file)}\n@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}\n`).join("")}`
       } satisfies ChangedFile
     }), { concurrency: 4 })
@@ -101,7 +119,8 @@ export const collectSnapshot = Effect.fn("Review.collectSnapshot")(function*(opt
       formatVersion: 1,
       repository: root,
       range: { base, head, worktree: options.worktree },
-      config,
+      organization,
+      skills,
       files
     },
     sources
