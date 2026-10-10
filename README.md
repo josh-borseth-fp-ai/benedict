@@ -6,16 +6,23 @@ Benedict is a cat who reviews code. He reads the change, reports only defects he
 
 ## Install
 
-Requires Node.js 22.20 or newer, Git, and read access to this private repository. Install from GitHub; npm clones the repository with your Git credentials and builds the CLI:
+Requires Node.js 22.20 or newer, Git, and read access to this private repository. `npm pack` clones the repository with your Git credentials and builds the CLI into a tarball, which is then installed globally:
 
 ```sh
-gh auth setup-git
-npm install --global github:josh-borseth-fp-ai/benedict
+cd "$(mktemp -d)"
+npm install --global "./$(npm pack --silent github:josh-borseth-fp-ai/benedict)"
 benedict --help
 benedict setup
 ```
 
-`gh auth setup-git` lets Git use your GitHub CLI login for the clone. Append `#<tag-or-commit>` to install a specific version, and rerun the install to upgrade. The package is not published to a registry.
+npm clones GitHub repositories over SSH. If you sign in to GitHub through `gh` rather than with an SSH key, first let Git use that login over HTTPS for this repository:
+
+```sh
+gh auth setup-git
+git config --global url."https://github.com/josh-borseth-fp-ai/benedict".insteadOf ssh://git@github.com/josh-borseth-fp-ai/benedict
+```
+
+Append `#<tag-or-commit>` to the `github:` spec to install a specific version, and rerun the install to upgrade. Installing the `github:` spec directly with `--global` fails because npm skips the build tools in that case. The package is not published to a registry.
 
 From a local checkout, `npm ci && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
 
