@@ -63,7 +63,7 @@ When organization knowledge is configured, include the source and organization r
 
 ## GitHub PR workflow
 
-Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with read access to the destination PR. Publishing also requires `BENEDICT_SERVICE_URL` and `BENEDICT_SERVICE_KEY`, and the Benedict GitHub App installed on the repository. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL:
+Requires the GitHub CLI (`gh`) installed and signed in to `github.com` with read access to the destination PR. Publishing also requires the Infisical CLI signed in (`infisical login`) with access to the Benedict project, and the Benedict GitHub App installed on the repository. Use a full `https://github.com/OWNER/REPO/pull/NUMBER` URL:
 
 ```sh
 benedict context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull/NUMBER
@@ -92,15 +92,15 @@ Files resolve from the shell's current directory. Config uses the same `--config
 
 For meaningful UI changes, follow [UI evidence guidance](ui-evidence.md): check existing screenshots and focused video, request missing evidence from the implementation agent, and include the uploaded media URLs or evidence-comment link, demonstrated scenario, captured head, and any gaps in the context file. `publish` preserves Markdown links; it does not capture or upload media, and a local filesystem path will not become a GitHub attachment. Local-only reviews do not upload or publish evidence.
 
-After local validation, the CLI sends the validated review to the Benedict service at `BENEDICT_SERVICE_URL` with the key in a header. The service renders the same review and posts it as the Benedict GitHub App, so GitHub shows `benedict[bot]` as the author. It does not run a model. The review is one GitHub PR review at the reviewed head:
+After local validation, the CLI reads the app credentials from Infisical and posts the review as the Benedict GitHub App, so GitHub shows `benedict[bot]` as the author. The review is one GitHub PR review at the reviewed head:
 
 - Each accepted finding is its own inline comment on the lines it cites, with its title, severity, lens, confidence, explanation and suggested fix when present. GitHub only accepts inline comments on lines in the PR diff; a finding that partly overlaps a diff hunk is anchored to the overlapping lines.
 - The summary starts with **AI-generated review** and identifies **Benedict**. It includes the resolved commits, finding counts, the overall confidence and optional context. Findings that do not touch the diff are listed there under **Findings outside the diff**, with source links and evidence.
 
-Rejected draft contents and local repository paths stay out of the review. The service checks that the PR is open, that the reviewed head is the current PR head and that the reviewed base lies inside the PR. Each publication with new content posts a new review; earlier reviews stay on the PR. Rerunning an identical review at the same head makes no write. PR metadata is rechecked before writing.
+Rejected draft contents and local repository paths stay out of the review. The CLI checks that the PR is open, that the reviewed head is the current PR head and that the reviewed base lies inside the PR. Each publication with new content posts a new review; earlier reviews stay on the PR. Rerunning an identical review at the same head makes no write. PR metadata is rechecked before writing.
 
 Add `--approve` to also request the app's approval; see [approve.md](approve.md).
 
-JSON output contains `action` (`dry-run`, `created`, or `unchanged`), `pr`, `reviewUrl`, `postedBy`, `approval`, `range`, `summary`, `confidence`, the exact summary `body`, and `comments`: each inline comment's `path`, `startLine`, `line` and `body`. Text output shows the action, destination, any approval outcome, the summary and each inline comment. Exit 0 means preview or publication succeeded, including when some drafts were dropped. Exit 1 means the review was published but a requested approval was refused. Exit 2 means publication failed; the CLI never automatically retries. After an uncertain `service_error`, rerunning the same command is safe. A summary or inline comment above 60,000 bytes fails so the agent can shorten the content.
+JSON output contains `action` (`dry-run`, `created`, or `unchanged`), `pr`, `reviewUrl`, `postedBy`, `approval`, `range`, `summary`, `confidence`, the exact summary `body`, and `comments`: each inline comment's `path`, `startLine`, `line` and `body`. Text output shows the action, destination, any approval outcome, the summary and each inline comment. Exit 0 means preview or publication succeeded, including when some drafts were dropped. Exit 1 means the review was published but a requested approval was refused. Exit 2 means publication failed; the CLI never automatically retries. After an uncertain `write_uncertain`, rerunning the same command is safe. A summary or inline comment above 60,000 bytes fails so the agent can shorten the content.
 
-`--dry-run` reads the PR and its changed-file patches and validates locally without contacting the service, so it needs `gh` but not the service settings. If publication fails, report the local findings and publication failure without claiming that a review was posted.
+`--dry-run` reads the PR and its changed-file patches and validates locally without posting, so it needs `gh` but not Infisical. If publication fails, report the local findings and publication failure without claiming that a review was posted.

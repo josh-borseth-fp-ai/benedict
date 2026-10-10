@@ -1,17 +1,19 @@
 import { createRequire } from "node:module"
 import { NodeServices } from "@effect/platform-node"
-import { Console, Effect, Option } from "effect"
+import { Console, Effect, Layer, Option } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
+import { FetchHttpClient } from "effect/http"
+import { AppGitHub } from "./app-github.js"
 import { checkFindings, readFindings } from "./check.js"
 import { collectSnapshot } from "./context.js"
 import { Git } from "./git.js"
 import { GitHub } from "./github.js"
+import { readAppCredentials } from "./infisical.js"
 import { publishReview } from "./publish.js"
 import { resolvePullRequest } from "./pull-request.js"
 import { ReviewError, configPath, lockPath } from "./model.js"
 import type { CheckReport, ReviewContext, ReviewOptions } from "./model.js"
 import { setup } from "./setup.js"
-import { serve } from "./app-server.js"
 import { repositoryRoot, syncOrganization } from "./sync.js"
 
 const rangeFlags = {
@@ -124,7 +126,7 @@ const publishCommand = Command.make("publish", {
   contextFile: Flag.String("context-file").pipe(Flag.optional, Flag.withDescription("Markdown file with useful review context")),
   confidence: Flag.Int("confidence").pipe(Flag.withDescription("Overall merge confidence (1-5); approval requires 4 or 5")),
   approve: Flag.Boolean("approve").pipe(Flag.withDefault(false), Flag.withDescription("Also ask the Benedict GitHub App to approve a clean whole-PR review")),
-  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Render the exact review without contacting the Benedict service; reads the PR and its diff"))
+  dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false), Flag.withDescription("Render the exact review without posting it; reads the PR and its diff and needs no app credentials"))
 }, Effect.fn(function*(flags) {
   const result = yield* publishReview({
     findings: flags.findings,
@@ -147,23 +149,22 @@ const publishCommand = Command.make("publish", {
   yield* Effect.sync(() => { process.exitCode = result.approval?.action === "refused" ? 1 : 0 })
 })).pipe(Command.withDescription("Post validated findings and context as a Benedict GitHub App review, and optionally approve the PR."))
 
-const serveCommand = Command.make("serve", {
-  host: Flag.String("host").pipe(Flag.withDefault("127.0.0.1")),
-  port: Flag.Int("port").pipe(Flag.withDefault(8080))
-}, Effect.fn(function*(flags) {
-  if (flags.port < 1 || flags.port > 65535) return yield* Effect.fail(new Error("--port must be between 1 and 65535."))
-  yield* serve(flags.host, flags.port)
-})).pipe(Command.withDescription("Run the stateless Benedict service that posts reviews and approvals as the GitHub App."))
-
 export const benedictCommand = Command.make("benedict").pipe(
   Command.withDescription("Benedict: deterministic code review tools for coding agents."),
-  Command.withSubcommands([contextCommand, checkCommand, publishCommand, serveCommand, syncCommand, setupCommand])
+  Command.withSubcommands([contextCommand, checkCommand, publishCommand, syncCommand, setupCommand])
 )
 
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string }
 
+// App credentials are read from Infisical only when a command posts to GitHub.
+const appGitHub = AppGitHub.layer(readAppCredentials()).pipe(
+  Layer.provide(FetchHttpClient.layer),
+  Layer.provide(Layer.succeed(FetchHttpClient.RequestInit)({ redirect: "error" }))
+)
+
 export const run = Command.run(benedictCommand, { version }).pipe(
   Effect.provide(Git.layer),
+  Effect.provide(appGitHub),
   Effect.provide(GitHub.layer),
   Effect.provide(NodeServices.layer),
   Effect.catch((error) => Effect.gen(function*() {

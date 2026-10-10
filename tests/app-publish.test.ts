@@ -1,31 +1,30 @@
 import assert from "node:assert/strict"
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto"
 import { test } from "node:test"
-import { Effect, Layer, Redacted } from "effect"
-import { FetchHttpClient, HttpRouter } from "effect/http"
+import { Effect, Layer } from "effect"
+import { FetchHttpClient } from "effect/http"
 import { appJwt, AppGitHub } from "../src/app-github.js"
-import { reviewsEndpoint, serviceError } from "../src/app-protocol.js"
-import type { ServiceError } from "../src/app-protocol.js"
-import { readServerConfig, serviceRoutes } from "../src/app-server.js"
-import { publishAsApp } from "../src/app-service.js"
-import { hunkRanges } from "../src/comment.js"
+import { publishAsApp } from "../src/app-publish.js"
+import { hunkRanges, renderReview } from "../src/comment.js"
+import { ReviewError } from "../src/model.js"
+import type { Finding } from "../src/model.js"
 
 const base = "a".repeat(40), head = "b".repeat(40), later = "c".repeat(40)
 const prUrl = "https://github.com/acme/project/pull/7"
 const bot = "benedict[bot]"
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 })
-const finding = { file: "safe.ts", startLine: 1, endLine: 1, severity: "high", skill: "correctness", title: "Bug", explanation: "Breaks.", quote: "x", confidence: 0.9 }
+const finding: Finding = { file: "safe.ts", startLine: 1, endLine: 1, severity: "high", skill: "correctness", title: "Bug", explanation: "Breaks.", quote: "x", confidence: 0.9 }
 
 type ReviewRecord = { state: string; commit_id: string; html_url: string; body: string; user: { login: string } }
 type InlineRecord = { path: string; body: string; side: string; line: number; start_line?: number; start_side?: string }
 type Write = { method: string; endpoint: string; body: { body: string; event: string; commit_id: string; comments: InlineRecord[] } }
 
+const fail = (code: string) => new ReviewError({ code, message: code })
+
 const fixture = () => {
   const state = {
     installed: true,
     pr: { state: "open", draft: false, head: { sha: head }, base: { sha: base }, changed_files: 2 },
-    // Merge bases by "from...to" pair; the PR merge base defaults to the base.
-    mergeBases: {} as Record<string, string>,
     config: JSON.stringify({ approve: { enabled: true } }) as string | undefined,
     files: [
       { filename: "safe.ts", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-y\n+x" },
@@ -38,21 +37,22 @@ const fixture = () => {
   const gh = AppGitHub.of({
     installation: repository => state.installed && repository === "acme/project"
       ? Effect.succeed({ token: "installation-token", login: bot })
-      : Effect.fail(serviceError("repository_disabled", "Not installed.")),
-    request: (token, method, endpoint, body) => Effect.suspend<unknown, ServiceError, never>(() => {
+      : Effect.fail(fail("repository_disabled")),
+    request: (token, method, endpoint, body) => Effect.suspend<unknown, ReviewError, never>(() => {
       assert.equal(token, "installation-token")
       if (method !== "GET") {
         const payload = body as Write["body"]
         state.writes.push({ method, endpoint, body: payload })
         assert.equal(endpoint, "repos/acme/project/pulls/7/reviews")
-        if (state.rejectApproval && payload.event === "APPROVE") return Effect.fail(serviceError("write_rejected", "GitHub refused the write."))
+        if (state.rejectApproval && payload.event === "APPROVE") return Effect.fail(fail("write_rejected"))
         const review = { state: payload.event === "APPROVE" ? "APPROVED" : "COMMENTED", commit_id: payload.commit_id, html_url: `${prUrl}#pullrequestreview-${90 + state.reviews.length}`, body: payload.body, user: { login: bot } }
         state.reviews.push(review)
-        return state.loseReview ? Effect.fail(serviceError("write_uncertain", "Lost response.", 502)) : Effect.succeed(review)
+        return state.loseReview ? Effect.fail(fail("write_uncertain")) : Effect.succeed(review)
       }
       const compare = /\/compare\/([a-f0-9]+)\.\.\.([a-f0-9]+)$/.exec(endpoint)
-      if (compare) return Effect.succeed({ merge_base_commit: { sha: state.mergeBases[`${compare[1]}...${compare[2]}`] ?? compare[1] } })
-      if (endpoint.includes("/contents/")) return state.config !== undefined && endpoint.includes("/contents/.benedict/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(serviceError("github_not_found", "Not found.", 404))
+      // The PR base is its merge base.
+      if (compare) return Effect.succeed({ merge_base_commit: { sha: compare[1] } })
+      if (endpoint.includes("/contents/")) return state.config !== undefined && endpoint.includes("/contents/.benedict/config.json?") ? Effect.succeed({ type: "file", encoding: "base64", content: Buffer.from(state.config).toString("base64"), size: state.config.length }) : Effect.fail(fail("github_not_found"))
       if (endpoint.includes("/files?")) return Effect.succeed(state.files)
       if (endpoint.includes("/reviews?")) {
         if (state.mutateAfterReviews) state.pr.head.sha = later
@@ -62,19 +62,24 @@ const fixture = () => {
       return Effect.succeed(structuredClone(state.pr))
     })
   })
-  const request = { version: 1, pr: prUrl, base, head, organizationRevision: null as string | null, findings: [] as unknown[], dropped: 2, confidence: 4, context: "Verified the changed path.", approve: true }
+  const request = { base, head, organizationRevision: null, findings: [] as Finding[], dropped: 2, confidence: 4, context: "Verified the changed path.", approve: true }
+  // The CLI renders the review from GitHub's PR patches before posting it.
+  const review = () => ({
+    ...request, repository: "acme/project", number: 7, url: prUrl,
+    rendered: renderReview(request, "acme/project", new Map(state.files.flatMap(file => file.patch === undefined ? [] : [[file.filename, file.patch] as const])))
+  })
   const run = <A, E>(effect: Effect.Effect<A, E, AppGitHub>) => Effect.runPromise(effect.pipe(Effect.provideService(AppGitHub, gh)))
-  const publish = () => run(publishAsApp(request))
-  const refuse = () => run(publishAsApp(request).pipe(Effect.flip))
+  const publish = () => run(publishAsApp(review()))
+  const refuse = () => run(publishAsApp(review()).pipe(Effect.flip))
   const approvals = () => state.writes.filter(write => write.body.event === "APPROVE")
-  return { state, gh, request, run, publish, refuse, approvals }
+  return { state, gh, request, review, run, publish, refuse, approvals }
 }
 
 test("the app approves a clean review in one review at the reviewed commit and is idempotent", async () => {
   const f = fixture()
   const result = await f.publish()
   assert.deepEqual(result, {
-    pr: prUrl, head, postedBy: bot,
+    postedBy: bot,
     review: { action: "created", url: `${prUrl}#pullrequestreview-90` },
     approval: { action: "approved", url: `${prUrl}#pullrequestreview-90` }
   })
@@ -151,7 +156,7 @@ test("approval refusals still publish the review and report the reason", async (
     ["findings", f => { f.request.findings.push(finding) }],
     ["low_confidence", f => { f.request.confidence = 3 }],
     ["draft", f => { f.state.pr.draft = true }],
-    ["partial_review", f => { f.request.base = later; f.state.mergeBases[`${later}...${head}`] = later }],
+    ["partial_review", f => { f.request.base = later }],
     ["approve_disabled", f => { f.state.config = JSON.stringify({ approve: { enabled: false } }) }],
     ["approve_disabled", f => { f.state.config = undefined }],
     ["config_error", f => { f.state.config = JSON.stringify({ stamp: { enabled: true } }) }],
@@ -174,22 +179,12 @@ test("approval refusals still publish the review and report the reason", async (
   }
 })
 
-test("the request fails without writing for closed PRs, stale or out-of-range reviews and invalid input", async () => {
+test("publication fails without writing for uninstalled repositories, closed PRs and stale reviews", async () => {
   const failures: Array<[string, (f: ReturnType<typeof fixture>) => void]> = [
     ["repository_disabled", f => { f.state.installed = false }],
     ["pr_closed", f => { f.state.pr.state = "closed" }],
     ["stale_review", f => { f.state.pr.head.sha = later }],
     ["stale_review", f => { f.state.mutateAfterReviews = true }],
-    // A base outside the PR: the PR merge base is not an ancestor of it.
-    ["range_error", f => { f.request.base = later; f.state.mergeBases[`${base}...${later}`] = "d".repeat(40) }],
-    // A base that is not an ancestor of the head.
-    ["range_error", f => { f.request.base = later; f.state.mergeBases[`${later}...${head}`] = base }],
-    ["invalid_request", f => { f.request.version = 2 }],
-    ["invalid_request", f => { f.request.findings.push({ ...finding, extra: true }) }],
-    ["invalid_request", f => { f.request.pr = "https://github.com/acme/project/issues/7" }],
-    ["invalid_request", f => { (f.request as Record<string, unknown>).stamp = true }],
-    ["comment_too_large", f => { f.request.context = "x".repeat(60_000) }],
-    ["comment_too_large", f => { f.request.findings.push({ ...finding, explanation: "x".repeat(60_000) }) }]
   ]
   for (const [code, mutate] of failures) {
     const f = fixture()
@@ -202,7 +197,6 @@ test("the request fails without writing for closed PRs, stale or out-of-range re
 test("a narrower range inside the PR publishes but cannot approve", async () => {
   const f = fixture()
   f.request.base = later
-  f.state.mergeBases[`${later}...${head}`] = later
   const result = await f.publish()
   assert.equal(result.review.action, "created")
   assert.equal(result.approval?.action === "refused" && result.approval.code, "partial_review")
@@ -218,7 +212,7 @@ test("a PR change between validation and the review write fails closed", async (
       ? Effect.succeed({ ...f.state.pr, head: { sha: later } })
       : f.gh.request(token, method, endpoint, body)
   })
-  const error = await Effect.runPromise(publishAsApp(f.request).pipe(Effect.flip, Effect.provideService(AppGitHub, changing)))
+  const error = await Effect.runPromise(publishAsApp(f.review()).pipe(Effect.flip, Effect.provideService(AppGitHub, changing)))
   assert.equal(error.code, "stale_review")
   assert.equal(f.state.writes.length, 0)
 })
@@ -259,47 +253,6 @@ test("another account's approval does not count, and a dismissed app approval is
   assert.equal(f.approvals().length, 1)
 })
 
-test("the reviews route requires the service key and exposes no other operations", async t => {
-  const f = fixture()
-  const app = Layer.mergeAll(serviceRoutes(Redacted.make("service-key")), Layer.succeed(AppGitHub)(f.gh))
-  const { handler, dispose } = HttpRouter.toWebHandler(app, { disableLogger: true })
-  t.after(dispose)
-  const call = (path: string, key: string, body?: unknown) => handler(new Request("https://benedict.example.invalid" + path, { method: body ? "POST" : "GET", headers: { "x-benedict-key": key, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined }))
-  assert.equal((await call("/api/health", "")).status, 200)
-  assert.equal((await call("/api/reviews", "wrong-key", f.request)).status, 401)
-  for (const path of ["/api/approve", "/api/users"]) assert.equal((await call(path, "service-key", {})).status, 404)
-  const invalid = await call("/api/reviews", "service-key", { ...f.request, version: 2 })
-  assert.equal(invalid.status, 400)
-  assert.equal(((await invalid.json()) as { error: { code: string } }).error.code, "invalid_request")
-  const response = await call("/api/reviews", "service-key", { ...f.request, confidence: 3 })
-  assert.equal(response.status, 200)
-  assert.equal(((await response.json()) as { approval: { code: string } }).approval.code, "low_confidence")
-  assert.equal(f.approvals().length, 0)
-})
-
-test("service configuration requires a strong key, a numeric app ID and an RSA private key", async () => {
-  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString()
-  const env = { BENEDICT_SERVICE_KEY: "a".repeat(32), GITHUB_APP_ID: "12345", GITHUB_APP_PRIVATE_KEY: pem }
-  const valid = await Effect.runPromise(readServerConfig(env))
-  assert.equal(valid.appId, "12345")
-  assert.ok(!String(valid.serviceKey).includes("a".repeat(32)))
-  // Secret managers commonly store PEM newlines escaped.
-  await Effect.runPromise(readServerConfig({ ...env, GITHUB_APP_PRIVATE_KEY: pem.replace(/\n/g, "\\n") }))
-  const ec = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString()
-  for (const changed of [{ BENEDICT_SERVICE_KEY: "weak" }, { GITHUB_APP_ID: "benedict" }, { GITHUB_APP_PRIVATE_KEY: "not a key" }, { GITHUB_APP_PRIVATE_KEY: ec }, { GITHUB_APP_ID: "" }]) {
-    const error = await Effect.runPromise(readServerConfig({ ...env, ...changed }).pipe(Effect.flip))
-    assert.equal(error.code, "service_config")
-  }
-})
-
-test("service URLs resolve the reviews endpoint and cannot carry credentials or use HTTP", () => {
-  assert.equal(reviewsEndpoint("https://benedict.example.com"), "https://benedict.example.com/api/reviews")
-  assert.equal(reviewsEndpoint("https://example.com/benedict/"), "https://example.com/benedict/api/reviews")
-  for (const value of ["http://example.com", "https://user:password@example.com", "https://example.com?key=secret", "https://example.com#fragment"]) {
-    assert.throws(() => reviewsEndpoint(value))
-  }
-})
-
 test("app JWTs are RS256-signed by the app with a bounded lifetime", () => {
   const [header, payload, signature] = appJwt("12345", privateKey, 1_000_000).split(".")
   assert.deepEqual(JSON.parse(Buffer.from(header!, "base64url").toString()), { alg: "RS256", typ: "JWT" })
@@ -317,7 +270,7 @@ test("installation tokens are scoped to the repository, and write outcomes are c
     return respond(request.url)
   }) as typeof fetch
   const run = <A, E>(use: (gh: AppGitHub["Service"]) => Effect.Effect<A, E>) => Effect.runPromise(Effect.flatMap(AppGitHub, use).pipe(
-    Effect.provide(AppGitHub.layer("12345", privateKey).pipe(Layer.provide(FetchHttpClient.layer))),
+    Effect.provide(AppGitHub.layer(Effect.succeed({ appId: "12345", privateKey })).pipe(Layer.provide(FetchHttpClient.layer))),
     Effect.provideService(FetchHttpClient.Fetch, fakeFetch)
   ))
   const installation = await run(gh => gh.installation("acme/project"))
