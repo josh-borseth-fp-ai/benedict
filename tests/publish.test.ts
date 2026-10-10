@@ -7,7 +7,7 @@ import { test } from "node:test"
 import type { TestContext } from "node:test"
 import { fileURLToPath } from "node:url"
 import type { Finding } from "../src/model.js"
-import { parsePullRequest, renderComment } from "../src/comment.js"
+import { parsePullRequest, renderReview } from "../src/comment.js"
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url))
 const prUrl = "https://github.com/example/project/pull/42"
@@ -26,7 +26,7 @@ const endpoint = args[args.indexOf('--header') + 2];
 fs.appendFileSync(process.env.BENEDICT_LOG, JSON.stringify({gh: {method,endpoint,args}})+'\\n');
 const state = JSON.parse(fs.readFileSync(process.env.BENEDICT_GH_STATE, 'utf8'));
 if (method !== 'GET' || !endpoint.includes('/pulls/')) throw new Error('Unexpected API request: ' + method + ' ' + endpoint);
-process.stdout.write(state.invalidJson ? '{' : JSON.stringify(state.pr));
+process.stdout.write(state.invalidJson ? '{' : JSON.stringify(endpoint.includes('/files?') ? state.files : state.pr));
 `
 const fakeService = `import fs from 'node:fs';
 globalThis.fetch = async (url, options) => {
@@ -35,16 +35,16 @@ globalThis.fetch = async (url, options) => {
   const mode = process.env.SERVICE_TEST_MODE;
   if (mode === 'fail') throw new Error('unknown outcome');
   if (mode === 'refuse') return new Response(JSON.stringify({error:{code:'stale_review',message:'The review is stale; review the current PR head.'}}),{status:409});
-  const stamp = !body.stamp ? null : mode === 'stamp-refused'
+  const approval = !body.approve ? null : mode === 'approval-refused'
     ? {action:'refused',code:'protected_path',message:'A protected path changed: infra/main.tf.'}
     : {action:'approved',url:body.pr+'#pullrequestreview-99'};
-  return new Response(JSON.stringify({pr:body.pr,head:body.head,postedBy:'benedict[bot]',comment:{action:'created',url:body.pr+'#issuecomment-55'},stamp}),{status:200});
+  return new Response(JSON.stringify({pr:body.pr,head:body.head,postedBy:'benedict[bot]',review:{action:'created',url:body.pr+'#pullrequestreview-99'},approval}),{status:200});
 };
 `
 
 type Call = {
   gh?: { method: string; endpoint: string; args: string[] }
-  service?: { url: string; headers: Record<string, string>; body: { version: number; pr: string; base: string; head: string; findings: Finding[]; dropped: number; confidence: number; context: string; stamp: boolean; organizationRevision: string | null }; redirect: string }
+  service?: { url: string; headers: Record<string, string>; body: { version: number; pr: string; base: string; head: string; findings: Finding[]; dropped: number; confidence: number; context: string; approve: boolean; organizationRevision: string | null }; redirect: string }
 }
 
 const fixture = (t: TestContext) => {
@@ -80,7 +80,7 @@ const fixture = (t: TestContext) => {
   writeFileSync(hook, fakeService)
   writeFileSync(input, JSON.stringify([draft]))
   writeFileSync(notes, "Verified the caller and ran the focused test.\n")
-  const initial = { pr: { state: "open", base: { sha: base }, head: { sha: head } } }
+  const initial = { pr: { state: "open", base: { sha: base }, head: { sha: head } }, files: [{ filename: "src.ts", patch: "@@ -1 +1 @@\n-export const value = 1;\n+export const value = 0;" }] }
   writeFileSync(statePath, JSON.stringify(initial))
   const state = (changes: object) => writeFileSync(statePath, JSON.stringify({ ...initial, ...changes }))
   const calls = (): Call[] => {
@@ -118,9 +118,9 @@ test("publication validates drafts, labels AI and sends the review to the truste
   const status = f.git("status", "--porcelain")
   const result = f.success("--context-file", f.notes)
   assert.equal(result.action, "created")
-  assert.equal(result.commentUrl, `${prUrl}#issuecomment-55`)
+  assert.equal(result.reviewUrl, `${prUrl}#pullrequestreview-99`)
   assert.equal(result.postedBy, "benedict[bot]")
-  assert.equal(result.stamp, null)
+  assert.equal(result.approval, null)
   assert.deepEqual(result.summary, { accepted: 1, rejected: 1 })
   assert.equal(result.range.base, f.base)
   assert.equal(result.range.head, f.head)
@@ -128,9 +128,10 @@ test("publication validates drafts, labels AI and sends the review to the truste
   assert.match(result.body, /Benedict GitHub App posted it/)
   assert.match(result.body, /does not indicate human authorship/)
   assert.match(result.body, /Overall confidence: \*\*4\/5\*\*/)
-  assert.ok(result.body.includes(explanation))
-  assert.ok(!result.body.includes("Rejected private draft"))
-  assert.match(result.body, new RegExp(`/blob/${f.head}/src.ts#L1-L1`))
+  assert.match(result.body, /Accepted findings: \*\*1\*\* \(1 inline\)/)
+  assert.deepEqual(result.comments.map(({ body, ...anchor }: { body: string }) => anchor), [{ path: "src.ts", startLine: 1, line: 1 }])
+  assert.ok(result.comments[0].body.includes(explanation))
+  assert.ok(!JSON.stringify(result).includes("Rejected private draft"))
   const [request, ...others] = f.requests()
   assert.equal(others.length, 0)
   assert.equal(request!.url, "https://benedict.example.invalid/api/reviews")
@@ -139,34 +140,38 @@ test("publication validates drafts, labels AI and sends the review to the truste
   assert.deepEqual(request!.body, {
     version: 1, pr: prUrl, base: f.base, head: f.head, organizationRevision: null,
     findings: [{ ...draft, explanation }], dropped: 1, confidence: 4,
-    context: "Verified the caller and ran the focused test.\n", stamp: false
+    context: "Verified the caller and ran the focused test.\n", approve: false
   })
+  assert.deepEqual(f.calls().flatMap(call => call.gh ? [call.gh.endpoint] : []), ["repos/example/project/pulls/42", "repos/example/project/pulls/42/files?per_page=100&page=1"])
   for (const call of f.calls()) if (call.gh) assert.deepEqual(call.gh.args.slice(1, 5), ["--hostname", "github.com", "--method", "GET"])
   assert.ok(!JSON.stringify(result).includes("test-key"))
   assert.equal(f.git("status", "--porcelain"), status)
 })
 
-test("dry-run renders the exact comment, only reads PR metadata and needs no service settings", (t) => {
+test("dry-run renders the exact review, only reads the PR and its diff and needs no service settings", (t) => {
   const f = fixture(t)
   const result = f.run(["--dry-run"], { BENEDICT_SERVICE_URL: "", BENEDICT_SERVICE_KEY: "" })
   assert.equal(result.status, 0, result.stderr)
   const preview = JSON.parse(result.stdout)
   assert.equal(preview.action, "dry-run")
-  assert.equal(preview.commentUrl, null)
-  assert.deepEqual(f.calls().map(call => call.gh?.endpoint), ["repos/example/project/pulls/42"])
-  assert.equal(f.success().body, preview.body)
+  assert.equal(preview.reviewUrl, null)
+  assert.deepEqual(f.calls().map(call => call.gh?.method), ["GET", "GET"])
+  const posted = f.success()
+  assert.equal(posted.body, preview.body)
+  assert.deepEqual(posted.comments, preview.comments)
 })
 
-test("--stamp asks the app to approve and reports a refusal with exit 1 after publishing", (t) => {
+test("--approve asks the app to approve and reports a refusal with exit 1 after publishing", (t) => {
   const f = fixture(t)
   writeFileSync(f.input, "[]")
-  const approved = f.success("--stamp", "--confidence", "5")
-  assert.deepEqual(approved.stamp, { action: "approved", url: `${prUrl}#pullrequestreview-99` })
-  assert.equal(f.requests()[0]!.body.stamp, true)
+  const approved = f.success("--approve", "--confidence", "5")
+  assert.deepEqual(approved.approval, { action: "approved", url: `${prUrl}#pullrequestreview-99` })
+  assert.equal(f.requests()[0]!.body.approve, true)
   assert.equal(f.requests()[0]!.body.confidence, 5)
-  const refused = f.run(["--stamp", "--format", "text"], { SERVICE_TEST_MODE: "stamp-refused" })
+  const refused = f.run(["--approve", "--format", "text"], { SERVICE_TEST_MODE: "approval-refused" })
   assert.equal(refused.status, 1, refused.stderr)
-  assert.match(refused.stdout, /^created: https:\/\/github.com\/example\/project\/pull\/42#issuecomment-55\nstamp refused \(protected_path\): A protected path changed/)
+  assert.match(refused.stdout, /^created: https:\/\/github.com\/example\/project\/pull\/42#pullrequestreview-99\napproval refused \(protected_path\): A protected path changed/)
+  assert.equal(f.run(["--stamp"]).status, 2)
 })
 
 test("confidence is required and must be an integer from 1 to 5", (t) => {
@@ -249,14 +254,17 @@ test("publish uses repository policy and supports explicit reviewed commits and 
   assert.equal(text.status, 0, text.stderr)
   assert.match(text.stdout, /dry-run: https:\/\/github.com/)
   assert.match(text.stdout, /AI-generated review/)
+  writeFileSync(join(f.repo, ".benedict/config.json"), "{}")
+  assert.match(f.run(["--dry-run", "--format", "text"]).stdout, /\n--- src\.ts:1 ---\n### Invalid result\n/)
   assert.equal(f.run(["--worktree"]).status, 2)
 })
 
-test("comment rendering preserves code fences and encodes unusual source paths", () => {
-  const body = renderComment({
+test("review rendering preserves code fences and encodes unusual source paths", () => {
+  const { body, comments } = renderReview({
     base: "a".repeat(40), head: "b".repeat(40), organizationRevision: "c".repeat(40), dropped: 0, confidence: 4, context: "",
     findings: [{ ...draft, file: "a (b)#.ts", title: "Title\n## <script>", quote: "```\ncode\n```", suggestedFix: "Keep the original value." }]
-  }, "example/project")
+  }, "example/project", new Map())
+  assert.deepEqual(comments, [])
   assert.ok(body.includes("a%20%28b%29%23.ts#L1-L1"))
   assert.ok(body.includes("````\n```\ncode\n```\n````"))
   assert.ok(!body.includes("\n## <script>"))

@@ -7,14 +7,14 @@ export class ServiceError extends Data.TaggedError("ServiceError")<{
   readonly status: number
 }> {}
 export const serviceError = (code: string, message: string, status = 409) => new ServiceError({ code, message, status })
-/** A PR cannot stamp changes to its review policy, organization lock or the Benedict skill. */
+/** The app does not approve changes to a PR's review policy, organization lock or the Benedict skill. */
 export const protectedPaths = [".benedict/**", ".agents/skills/benedict/**"]
 export const Sha = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
 /** Approval requires an overall review confidence of at least 4/5. */
 export const minimumConfidence = 4
 
-/** A review validated by the developer's CLI. The service renders and posts it as the GitHub App. */
+/** A review validated by the developer's CLI. The service renders and posts it as a GitHub App review. */
 export const ReviewRequest = Schema.Struct({
   version: Schema.Literal(1),
   pr: Schema.String,
@@ -24,19 +24,19 @@ export const ReviewRequest = Schema.Struct({
   dropped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   confidence: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
   context: Schema.String,
-  stamp: Schema.Boolean
+  approve: Schema.Boolean
 })
 export type ReviewRequest = typeof ReviewRequest.Type
 
-export const StampOutcome = Schema.Union([
+export const ApprovalOutcome = Schema.Union([
   Schema.Struct({ action: Schema.Literals(["approved", "already-approved"]), url: Schema.String }),
   Schema.Struct({ action: Schema.Literal("refused"), code: Schema.String, message: Schema.String })
 ])
-export type StampOutcome = typeof StampOutcome.Type
+export type ApprovalOutcome = typeof ApprovalOutcome.Type
 export const ReviewResult = Schema.Struct({
   pr: Schema.String, head: Sha, postedBy: Schema.String,
-  comment: Schema.Struct({ action: Schema.Literals(["created", "updated", "unchanged"]), url: Schema.String }),
-  stamp: Schema.NullOr(StampOutcome)
+  review: Schema.Struct({ action: Schema.Literals(["created", "unchanged"]), url: Schema.String }),
+  approval: Schema.NullOr(ApprovalOutcome)
 })
 export type ReviewResult = typeof ReviewResult.Type
 

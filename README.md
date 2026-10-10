@@ -40,7 +40,7 @@ flowchart LR
     V --> P["benedict publish"]
     C -->|"--confidence and Markdown context"| P
     P --> B["Benedict service"]
-    B --> G["AI-generated PR review comment from benedict[bot]"]
+    B --> G["AI-generated PR review with inline comments from benedict[bot]"]
 ```
 
 This diagram shows how Benedict carries the new report content. The diagram generated for a reviewed PR describes that PR's own changes.
@@ -116,7 +116,7 @@ benedict context --repo /path/to/project --pr https://github.com/OWNER/REPO/pull
 See the [PR workflow](.agents/skills/benedict/references/cli.md#github-pr-workflow) for details. Publish the same resolved range:
 
 ```sh
-# Preview the exact comment. This reads PR metadata and does not contact the service.
+# Preview the exact review. This reads the PR and its diff and does not contact the service.
 benedict publish /tmp/findings.json \
   --pr https://github.com/OWNER/REPO/pull/NUMBER \
   --base <reviewed-base-hash> --head <reviewed-head-hash> \
@@ -129,13 +129,17 @@ benedict publish /tmp/findings.json \
   --context-file /tmp/review-context.md --confidence 4
 ```
 
-The CLI validates the findings and range locally, then sends the validated review to the service. The service renders the comment and posts it as `benedict[bot]`. The comment is headed **AI-generated review** and identifies **Benedict**. It includes validated findings, source links, the reviewed commits, the organization knowledge revision when configured, the overall confidence, and Markdown context containing the rationale and a Mermaid diagram of the PR's changes. Relevant checks and verified behavior can accompany that context. Rejected drafts are counted but their contents are omitted.
+The CLI validates the findings and range locally, then sends the validated review to the service. The service posts it as a GitHub PR review from `benedict[bot]` at the reviewed commit:
 
-The app keeps one marked review comment per PR, whichever developer publishes. Later runs update it, and identical content is left unchanged. Human comments and other authors' comments are untouched. The CLI and the service both verify that the reviewed range belongs to the PR, and the service rechecks PR metadata immediately before writing. The comment records its exact reviewed commit.
+- Each accepted finding becomes its own inline comment on the lines it cites, with its severity, lens, confidence, explanation and suggested fix. A finding that only partly overlaps the PR diff is anchored to the overlapping lines.
+- The review summary is headed **AI-generated review** and identifies **Benedict**. It includes the reviewed commits, the organization knowledge revision when configured, the finding counts, the overall confidence, and Markdown context containing the rationale and a Mermaid diagram of the PR's changes. Relevant checks and verified behavior can accompany that context.
+- GitHub only accepts inline comments on lines in the PR diff. Findings on unchanged lines are listed in the summary under **Findings outside the diff**, with source links and evidence.
+
+Rejected drafts are counted but their contents are omitted. Every publication with new content posts a new review, so the PR keeps the history of each review round. Rerunning an identical review at the same commit makes no write. Human comments and reviews are untouched. The CLI and the service both verify that the reviewed range belongs to the PR, and the service rechecks PR metadata immediately before writing.
 
 The CLI keeps `--context-file` optional for direct callers; the skill requires it for PR reviews so the rationale and diagram are included. The CLI preserves this Markdown, and [GitHub renders fenced Mermaid blocks](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams). `publish` accepts draft findings in the same format as `check` and revalidates them. If omitted, the base defaults to the PR merge base and the head to local `HEAD`; those commits must be available locally. `--repo` and `--config` work as in `check`. Worktree findings must be reviewed again after committing before publication.
 
-`publish` returns the action, comment URL, posting account, stamp outcome, exact body and counts as JSON, or readable text with `--format text`. Exit 0 means publication or preview succeeded. Exit 1 means the review was published but a requested stamp was refused. Exit 2 means publication failed. The CLI never retries automatically; after an uncertain service error, rerunning the same command is safe. Comments above 60,000 bytes fail for shortening.
+`publish` returns the action, review URL, posting account, approval outcome, exact summary body, inline comments and counts as JSON, or readable text with `--format text`. Exit 0 means publication or preview succeeded. Exit 1 means the review was published but a requested approval was refused. Exit 2 means publication failed. The CLI never retries automatically; after an uncertain service error, rerunning the same command is safe. A summary or inline comment above 60,000 bytes fails for shortening.
 
 ## Optional config
 
@@ -224,22 +228,22 @@ The integration tests run the built executable against temporary repositories an
 
 Every merge to `main` publishes a release. The release workflow picks the next patch version after the latest `v*` tag, runs the tests, packs the CLI and skill as `benedict.tgz`, and creates the tagged GitHub release that the install command downloads. To start a new minor or major version, raise `version` in the PR with `npm version <version> --no-git-tag-version`; the next release uses it. A commit that already has a release tag is not released again.
 
-## Stamp a PR
+## Approve a PR
 
-A stamp is a GitHub approval from the organization's **Benedict** GitHub App, based on the review your local agent just completed. The agent requests it while publishing the whole-PR review:
+Benedict can approve a PR as the organization's **Benedict** GitHub App, based on the review your local agent just completed. The agent requests approval while publishing the whole-PR review:
 
 ```sh
 benedict publish /tmp/findings.json --repo /path/to/project \
   --pr https://github.com/ORG/REPO/pull/123 \
   --base <reviewed-merge-base> --head <reviewed-head> \
-  --context-file /tmp/review-context.md --confidence 4 --stamp
+  --context-file /tmp/review-context.md --confidence 4 --approve
 ```
 
-A PR qualifies when the review has **zero accepted findings** and an **overall confidence of 4/5 or 5/5**. The service posts the review first. It then reads the stamp settings from the base branch's `.benedict/config.json`, checks the stamp conditions against GitHub and approves as `<app>[bot]` at the reviewed commit, labelled **Benedict — automated approval** and linking the review comment.
+A PR qualifies when the review has **zero accepted findings** and an **overall confidence of 4/5 or 5/5**. The service reads the approve settings from the base branch's `.benedict/config.json` and checks the approval conditions against GitHub. When they pass, the review itself is submitted as an approval from `<app>[bot]` at the reviewed commit, labelled **Benedict — automated approval**.
 
 ```json
 {
-  "stamp": {
+  "approve": {
     "enabled": true,
     "denyPaths": ["infra/**", ".github/workflows/**"],
     "maxChangedLines": 400
@@ -247,33 +251,33 @@ A PR qualifies when the review has **zero accepted findings** and an **overall c
 }
 ```
 
-Stamp settings belong on the base branch, so a PR cannot enable its own stamping. The app's installation determines which repositories it can post to and stamp.
+Approve settings belong on the base branch, so a PR cannot enable its own approval. The app's installation determines which repositories it can post to and approve.
 
-The service refuses a stamp for:
+The service refuses approval for:
 
 - draft PRs, and reviews that do not cover the whole current PR;
 - accepted findings, or confidence below 4/5;
-- stamping not enabled on the base branch;
+- approval not enabled on the base branch;
 - protected paths and changes over the size limit.
 
-Everything under `.benedict/` (config and organization lock) and the Benedict skill are protected by default. Binary or unavailable text patches require manual review. A refused stamp still publishes the review; `publish` reports the reason and exits 1.
+Everything under `.benedict/` (config and organization lock) and the Benedict skill are protected by default. Binary or unavailable text patches require manual review. A refused approval still publishes the review as a comment review; `publish` reports the reason and exits 1.
 
 Repeated requests are safe. The service returns `already-approved` when the bot already approved that commit. It refuses when that approval was dismissed. After a timeout, rerun the same command.
 
 Whether the bot's approval satisfies branch requirements depends on repository rules. A GitHub App cannot be a code owner, so required code-owner reviews still need a person. Enable dismissal of stale approvals so new commits need a new review.
 
-To require a review and stamp on every PR, add this to a repository's `AGENTS.md`:
+To require a review and approval on every PR, add this to a repository's `AGENTS.md`:
 
 ```md
 ## Benedict
 
 After opening a PR or pushing to one, use the `benedict` skill to review the whole
-current PR, publish the review, and stamp it. Fix accepted findings and repeat.
-If the stamp is refused, report the reason and request human review; do not
-approve the PR another way.
+current PR, publish the review, and request approval. Fix accepted findings and
+repeat. If approval is refused, report the reason and request human review; do
+not approve the PR another way.
 ```
 
-Anyone with the service key can publish reviews and request stamps, including for their own PR. The base-branch rules, bot attribution, linked review comment and stale-approval dismissal limit that and make it visible. Rotate the key when someone leaves. Mechanical validation cannot prove the AI's defect assessment; the approval depends on the completed review.
+Anyone with the service key can publish reviews and request approvals, including for their own PR. The base-branch rules, bot attribution, published review and stale-approval dismissal limit that and make it visible. Rotate the key when someone leaves. Mechanical validation cannot prove the AI's defect assessment; the approval depends on the completed review.
 
 Service tests are part of `npm test`, and can also be run with:
 
