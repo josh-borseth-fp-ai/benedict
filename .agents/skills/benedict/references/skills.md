@@ -6,7 +6,7 @@ A review skill tells the reviewer what to look for. Every review uses three scop
 - **Organization:** skills from a shared Git repository, pinned to a locked revision.
 - **Repository:** skills committed in the reviewed repository.
 
-Skill names are unique across scopes. A repository or organization skill cannot reuse a built-in name or another scope's name; rename it instead.
+When two scopes have a skill with the same name, the more specific one wins: a repository skill replaces an organization or built-in skill, and an organization skill replaces a built-in one. `benedict context` reports the scope of the skill that applies.
 
 ## Writing a skill
 
@@ -56,6 +56,6 @@ The cache uses `$XDG_CACHE_HOME/benedict`, `~/.cache/benedict` on Unix, or the l
 
 ## During review
 
-If the base has a valid lock but the cache is missing, `benedict sync` restores that exact revision without changing the lock. A missing or mismatched lock, or a skill name conflict, is an onboarding issue: report it instead of claiming a validated review. Do not run setup or `sync --update` during a read-only review, or advance the organization revision to get past an error.
+If the base has a valid lock but the cache is missing, `benedict sync` restores that exact revision without changing the lock. A missing or mismatched lock, or an invalid skill, is an onboarding issue: report it instead of claiming a validated review. Do not run setup or `sync --update` during a read-only review, or advance the organization revision to get past an error.
 
 Skill changes are proposed and approved through Git; do not promote one review's observation into a skill automatically.

@@ -172,27 +172,35 @@ test("check accepts organization skills and identifies the organization revision
   assert.equal(report.accepted[0]?.skill, "credentials")
 })
 
-test("skill names cannot collide across scopes, and failed updates keep the previous lock", (t) => {
-  const { repo, configure, sync, organization, run, lockPath, context, revision, failure } = fixture(t)
+test("invalid organization skills fail closed, and failed updates keep the previous lock", (t) => {
+  const { repo, configure, sync, organization, lockPath, context, revision, failure } = fixture(t)
   configure()
   sync()
   commit(repo, "connect organization")
   const before = readFileSync(lockPath, "utf8")
-  for (const change of [
-    () => skill(organization, "security", "Replaces the built-in skill."),
-    () => write(organization, ".benedict/skills/broken/SKILL.md", "No frontmatter.\n")
-  ]) {
-    change()
-    commit(organization, "bad skill")
-    assert.equal(failure("sync", "--update"), "skill_error")
-    assert.equal(readFileSync(lockPath, "utf8"), before)
-    git(organization, "reset", "--quiet", "--hard", revision)
-  }
+  write(organization, ".benedict/skills/broken/SKILL.md", "No frontmatter.\n")
+  commit(organization, "bad skill")
+  assert.equal(failure("sync", "--update"), "skill_error")
+  assert.equal(readFileSync(lockPath, "utf8"), before)
   assert.equal(context().organization?.revision, revision)
-  skill(repo, "credentials", "A repository copy.")
-  commit(repo, "conflicting repository skill")
-  assert.equal(failure("context", "--worktree"), "skill_error")
-  assert.equal(run("sync").status, 0)
+})
+
+test("repository skills override organization skills, which override built-in skills", (t) => {
+  const { repo, configure, sync, organization, context, skillBody } = fixture(t)
+  skill(organization, "security", "Organization security rules.", "Organization security.")
+  commit(organization, "replace built-in security")
+  configure()
+  sync()
+  commit(repo, "connect organization")
+  const scopes = () => Object.fromEntries(context().skills.map((item) => [item.name, item.scope]))
+  assert.deepEqual(scopes(), { correctness: "built-in", security: "organization", credentials: "organization" })
+  assert.match(skillBody("security"), /Organization security rules/)
+  skill(repo, "credentials", "Repository credential rules.", "Repository credentials.")
+  skill(repo, "security", "Repository security rules.", "Repository security.")
+  commit(repo, "replace organization skills")
+  assert.deepEqual(scopes(), { correctness: "built-in", security: "repository", credentials: "repository" })
+  assert.match(skillBody("credentials"), /Repository credential rules/)
+  assert.match(skillBody("security"), /Repository security rules/)
 })
 
 test("organization skills cannot be symlinks", (t) => {

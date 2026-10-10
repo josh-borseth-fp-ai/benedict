@@ -138,16 +138,9 @@ export const readBuiltinSkills = Effect.fn("Skills.readBuiltin")(function*() {
   ))
 })
 
-/** Combines every scope's skills. Names are unique, so a skill cannot replace another scope's skill. */
-export const combineSkills = (...scopes: ReadonlyArray<ReadonlyArray<ReviewSkill>>) => Effect.suspend(() => {
-  const byName = new Map<string, ReviewSkill>()
-  for (const skill of scopes.flat()) {
-    const existing = byName.get(skill.name)
-    if (existing) return Effect.fail(skillError(`The ${existing.scope} and ${skill.scope} skills both use the name ${JSON.stringify(skill.name)}; rename one.`))
-    byName.set(skill.name, skill)
-  }
-  return Effect.succeed<ReadonlyArray<ReviewSkill>>([...byName.values()])
-})
+/** Combines scopes from least to most specific. A later scope's skill replaces an earlier skill with the same name. */
+export const combineSkills = (...scopes: ReadonlyArray<ReadonlyArray<ReviewSkill>>): ReadonlyArray<ReviewSkill> =>
+  [...new Map(scopes.flat().map((skill) => [skill.name, skill])).values()]
 
 export const summarize = ({ content: _, ...summary }: ReviewSkill): SkillSummary => summary
 

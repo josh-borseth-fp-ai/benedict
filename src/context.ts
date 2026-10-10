@@ -9,12 +9,13 @@ import { combineSkills, readBuiltinSkills, readCommittedSkills, skillsForPath, s
 
 /**
  * Loads the review skills committed at the base: built-in, organization and repository skills.
+ * A repository skill replaces an organization or built-in skill with the same name, and an organization skill replaces a built-in one.
  * A change is reviewed under the policy it starts from, so it cannot rewrite its own review.
  */
 export const loadReviewSkills = Effect.fn("Review.loadSkills")(function*(root: string, base: string) {
   const config = yield* readCommittedConfig(root, base)
   const organization = config.organization === undefined ? null : yield* loadOrganization(root, base, config.organization)
-  const skills = yield* combineSkills(
+  const skills = combineSkills(
     yield* readBuiltinSkills(),
     organization?.skills ?? [],
     yield* readCommittedSkills(root, base, "repository")

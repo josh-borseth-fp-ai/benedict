@@ -5,7 +5,6 @@ import { Git } from "./git.js"
 import { ReviewError, configPath } from "./model.js"
 import type { ConfigFile } from "./model.js"
 import { cacheDirectory, readLock, readOrganizationSkills, resolveOrganization, writeLock } from "./organization.js"
-import { combineSkills, readBuiltinSkills } from "./skills.js"
 
 export const repositoryRoot = Effect.fn("Review.repositoryRoot")(function*(directory: string) {
   const git = yield* Git
@@ -61,7 +60,6 @@ export const prepareOrganization = Effect.fn("Organization.prepare")(function*(r
   }
   const lock = { version: 1 as const, ...resolved, revision }
   const skills = yield* readOrganizationSkills(cache, lock)
-  yield* combineSkills(yield* readBuiltinSkills(), skills)
   return { lock, skills }
 })
 
