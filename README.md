@@ -6,18 +6,18 @@ Benedict is a cat who reviews code. He reads the change, reports only defects he
 
 ## Install
 
-Requires Node.js 22.20 or newer and Git. Install from GitHub: `npm pack` downloads the repository and builds the CLI into a tarball, which is then installed globally:
+Requires Node.js 22.20 or newer and Git. Install the latest release from GitHub:
 
 ```sh
-cd "$(mktemp -d)"
-npm install --global "./$(npm pack --silent github:josh-borseth-fp-ai/benedict)"
-benedict --help
+npm install --global https://github.com/josh-borseth-fp-ai/benedict/releases/latest/download/benedict.tgz
 benedict setup
 ```
 
-Append `#<tag-or-commit>` to the `github:` spec to install a specific version, and rerun the install to upgrade. Installing the `github:` spec directly with `--global` fails because npm skips the build tools in that case. The package is not published to a registry.
+Rerun the same command to upgrade. To pin a version, replace `latest/download` with `download/v<version>`. The package is not published to a registry.
 
-From a local checkout, `npm ci && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
+Each release attaches a prebuilt `benedict.tgz`. To release, set `version` in `package.json`, merge, and push a matching `v<version>` tag; the release workflow runs the tests, packs the CLI and skill, and creates the GitHub release.
+
+From a local checkout, `npm ci && npm run build && npm install --global .` installs the same build, and `npm run benedict -- context --repo /path/to/project` runs it without a global install. If your global npm directory is not writable, add `--prefix "$HOME/.local"` to the install and put `$HOME/.local/bin` on your PATH.
 
 ## Use it with a coding agent
 
