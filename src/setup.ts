@@ -12,7 +12,6 @@ import { loadOrganization, resolveSource, reviewDirectory, writeAtomically } fro
 export interface SetupOptions {
   readonly repo: string
   readonly organization?: string
-  readonly project: boolean
   readonly agents: ReadonlyArray<string>
   readonly yes: boolean
   readonly skipSkills: boolean
@@ -24,7 +23,6 @@ const installer = fileURLToPath(new URL("./bin/cli.mjs", pathToFileURL(createReq
 export const installSkill = Effect.fn("Setup.installSkill")(function*(cwd: string, options: SetupOptions) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const args = [installer, "add", bundledSkill, "--skill", "benedict",
-    ...(options.project ? [] : ["--global"]),
     ...options.agents.flatMap((agent) => ["--agent", agent]),
     ...(options.yes ? ["--yes", "--json"] : [])]
   if (options.yes && options.agents.length === 0) {
@@ -67,15 +65,11 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
   if (options.yes && !options.skipSkills && options.agents.length === 0) {
     return yield* new ReviewError({ code: "setup_error", message: "For non-interactive setup, select agents with --agent <name> (repeat as needed, or use --agent '*')." })
   }
-  const path = yield* Path.Path
-  const location = yield* repositoryRoot(options.repo).pipe(Effect.result)
-  if (location._tag === "Failure" && (options.project || options.organization !== undefined)) {
-    return yield* new ReviewError({ code: "setup_error", message: "Project installation and organization setup require a Git repository. Run inside a project or pass --repo." })
-  }
-  const root = location._tag === "Success" ? location.success : null
+  const root = yield* repositoryRoot(options.repo).pipe(Effect.mapError(() =>
+    new ReviewError({ code: "setup_error", message: "Setup installs Benedict into a Git repository. Run inside a project or pass --repo." })))
   let organization: OrganizationRevision | null = null
   let declaration: { source: string | null; decoded: ConfigFile } | null = null
-  if (root !== null && options.organization !== undefined) {
+  if (options.organization !== undefined) {
     const local = yield* readRepositoryConfig(root)
     const requested = { source: options.organization }
     if (local.decoded.organization) {
@@ -88,7 +82,7 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
     // Fetch once so an unreachable source or a repository without skills fails before anything is written.
     organization = (yield* loadOrganization(root, requested)).organization
   }
-  if (!options.skipSkills) yield* installSkill(root ?? path.resolve(options.repo), options)
-  if (root !== null && declaration) yield* saveDeclaration(root, declaration.source, declaration.decoded)
-  return { skillInstalled: !options.skipSkills, scope: options.project ? "project" : "user", repository: root, organization, configChanged: declaration !== null }
+  if (!options.skipSkills) yield* installSkill(root, options)
+  if (declaration) yield* saveDeclaration(root, declaration.source, declaration.decoded)
+  return { skillInstalled: !options.skipSkills, repository: root, organization, configChanged: declaration !== null }
 })
