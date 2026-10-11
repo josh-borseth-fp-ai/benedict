@@ -7,7 +7,7 @@ import { test } from "node:test"
 import type { TestContext } from "node:test"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import type { CheckReport, OrganizationLock, ReviewContext } from "../src/model.js"
+import type { CheckReport, ReviewContext } from "../src/model.js"
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url))
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, {
@@ -67,22 +67,13 @@ const fixture = (t: TestContext) => {
     return JSON.parse(result.stderr).error.code as string
   }
   const configure = (extra: Record<string, unknown> = {}) => repoConfig(repo, { organization: { source: organization }, ...extra })
-  const sync = (...args: string[]) => {
-    const result = run("sync", ...args)
-    assert.equal(result.status, 0, result.stderr)
-    return JSON.parse(result.stdout) as { organization: OrganizationLock; skills: string[]; lockChanged: boolean }
-  }
-  const lockPath = join(repo, ".benedict/organization.lock.json")
-  return { area, repo, organization, home, cache, revision, env, run, context, skillBody, failure, configure, sync, lockPath }
+  const connect = () => { configure(); commit(repo, "connect organization") }
+  return { area, repo, organization, home, cache, revision, env, run, context, skillBody, failure, configure, connect }
 }
 
-test("sync pins organization skills, and context lists them with the revision", (t) => {
-  const { repo, configure, revision, sync, context, skillBody, run } = fixture(t)
-  configure()
-  const synced = sync()
-  assert.equal(synced.organization.revision, revision)
-  assert.deepEqual(synced.skills, ["credentials"])
-  commit(repo, "connect organization")
+test("context fetches organization skills and lists them with the revision", (t) => {
+  const { connect, revision, context, skillBody, run } = fixture(t)
+  connect()
   const result = context()
   assert.equal(result.organization?.revision, revision)
   assert.deepEqual(result.skills.map((item) => [item.name, item.scope]), [["correctness", "built-in"], ["security", "built-in"], ["credentials", "organization"]])
@@ -97,70 +88,50 @@ test("the organization repository reviews itself with its skills as repository s
   assert.deepEqual((JSON.parse(result.stdout) as ReviewContext).skills.at(-1)?.scope, "repository")
 })
 
-test("sync requires organization skills", (t) => {
-  const { organization, configure, failure, lockPath } = fixture(t)
+test("the organization config applies once it is committed at the review's base", (t) => {
+  const { repo, configure, context, revision } = fixture(t)
+  configure()
+  assert.equal(context().organization, null)
+  commit(repo, "connect organization")
+  assert.equal(context().organization?.revision, revision)
+})
+
+test("every review uses the organization's latest default branch", (t) => {
+  const { connect, organization, context, skillBody, revision } = fixture(t)
+  connect()
+  assert.equal(context().organization?.revision, revision)
+  skill(organization, "credentials", "Updated guidance.")
+  const next = commit(organization, "update skill")
+  assert.equal(context().organization?.revision, next)
+  assert.equal(skillBody("credentials"), "Updated guidance.\n")
+  git(organization, "checkout", "--quiet", "-b", "draft")
+  skill(organization, "credentials", "Unmerged draft guidance.")
+  commit(organization, "draft on another branch")
+  git(organization, "checkout", "--quiet", "-")
+  assert.equal(context().organization?.revision, next)
+})
+
+test("reviews fail when the organization cannot be fetched, even with a warm cache", (t) => {
+  const { connect, organization, context, cache, failure } = fixture(t)
+  connect()
+  context()
+  assert.equal(existsSync(cache), true)
+  renameSync(organization, organization + "-offline")
+  assert.equal(failure("context", "--worktree"), "organization_unavailable")
+  assert.equal(failure("skill", "credentials", "--base", "HEAD"), "organization_unavailable")
+})
+
+test("reviews require organization skills", (t) => {
+  const { organization, connect, failure } = fixture(t)
   git(organization, "mv", ".benedict/skills", "skills")
   commit(organization, "skills outside .benedict")
-  configure()
-  assert.equal(failure("sync"), "organization_error")
-  assert.equal(existsSync(lockPath), false)
-})
-
-test("review commands require the committed lock and cache without fetching implicitly", (t) => {
-  const { repo, configure, sync, cache, organization, context, revision, lockPath, failure } = fixture(t)
-  configure()
-  commit(repo, "config without lock")
-  assert.equal(failure("context", "--worktree"), "organization_unavailable")
-  assert.equal(existsSync(cache), false)
-  sync()
-  // The lock only applies once it is committed at the review's base.
-  assert.equal(failure("context", "--worktree"), "organization_unavailable")
-  commit(repo, "lock")
-  const locked = readFileSync(lockPath, "utf8")
-  renameSync(organization, organization + "-offline")
-  assert.equal(context().organization?.revision, revision)
-  assert.equal(sync().lockChanged, false)
-  assert.equal(readFileSync(lockPath, "utf8"), locked)
-  rmSync(cache, { recursive: true })
-  assert.equal(failure("context", "--worktree"), "organization_unavailable")
-  assert.equal(existsSync(cache), false)
-})
-
-test("organization changes require --update; normal sync preserves the pin", (t) => {
-  const { repo, configure, sync, organization, revision, skillBody, lockPath } = fixture(t)
-  configure()
-  sync()
-  commit(repo, "connect organization")
-  const locked = readFileSync(lockPath, "utf8")
-  skill(organization, "credentials", "Updated approved guidance.")
-  const next = commit(organization, "update skill")
-  assert.equal(sync().organization.revision, revision)
-  assert.equal(readFileSync(lockPath, "utf8"), locked)
-  assert.equal(skillBody("credentials"), "Never log credentials.\n")
-  assert.equal(sync("--update").organization.revision, next)
-  commit(repo, "update organization")
-  assert.equal(skillBody("credentials"), "Updated approved guidance.\n")
-})
-
-test("a fresh machine restores the exact lock instead of the current branch", (t) => {
-  const { repo, configure, sync, cache, organization, revision, skillBody } = fixture(t)
-  configure()
-  sync()
-  commit(repo, "connect organization")
-  skill(organization, "credentials", "Newer guidance.")
-  commit(organization, "later")
-  rmSync(cache, { recursive: true })
-  const result = sync()
-  assert.equal(result.organization.revision, revision)
-  assert.equal(result.lockChanged, false)
-  assert.equal(skillBody("credentials"), "Never log credentials.\n")
+  connect()
+  assert.equal(failure("context", "--worktree"), "organization_error")
 })
 
 test("check accepts organization skills and identifies the organization revision", (t) => {
-  const { area, repo, configure, sync, run, revision } = fixture(t)
-  configure()
-  sync()
-  commit(repo, "connect organization")
+  const { area, repo, connect, run, revision } = fixture(t)
+  connect()
   write(repo, "src.ts", "after();\n")
   const input = join(area, "findings.json")
   writeFileSync(input, JSON.stringify({ findings: [{ file: "src.ts", startLine: 1, endLine: 1,
@@ -172,26 +143,19 @@ test("check accepts organization skills and identifies the organization revision
   assert.equal(report.accepted[0]?.skill, "credentials")
 })
 
-test("invalid organization skills fail closed, and failed updates keep the previous lock", (t) => {
-  const { repo, configure, sync, organization, lockPath, context, revision, failure } = fixture(t)
-  configure()
-  sync()
-  commit(repo, "connect organization")
-  const before = readFileSync(lockPath, "utf8")
+test("invalid organization skills fail closed", (t) => {
+  const { connect, organization, failure } = fixture(t)
+  connect()
   write(organization, ".benedict/skills/broken/SKILL.md", "No frontmatter.\n")
   commit(organization, "bad skill")
-  assert.equal(failure("sync", "--update"), "skill_error")
-  assert.equal(readFileSync(lockPath, "utf8"), before)
-  assert.equal(context().organization?.revision, revision)
+  assert.equal(failure("context", "--worktree"), "skill_error")
 })
 
 test("repository skills override organization skills, which override built-in skills", (t) => {
-  const { repo, configure, sync, organization, context, skillBody } = fixture(t)
+  const { repo, connect, organization, context, skillBody } = fixture(t)
   skill(organization, "security", "Organization security rules.", "Organization security.")
   commit(organization, "replace built-in security")
-  configure()
-  sync()
-  commit(repo, "connect organization")
+  connect()
   const scopes = () => Object.fromEntries(context().skills.map((item) => [item.name, item.scope]))
   assert.deepEqual(scopes(), { correctness: "built-in", security: "organization", credentials: "organization" })
   assert.match(skillBody("security"), /Organization security rules/)
@@ -204,42 +168,34 @@ test("repository skills override organization skills, which override built-in sk
 })
 
 test("organization skills cannot be symlinks", (t) => {
-  const { organization, configure, failure, area, lockPath } = fixture(t)
+  const { organization, connect, failure, area } = fixture(t)
   writeFileSync(join(area, "outside.md"), "---\nname: linked\ndescription: Outside.\n---\n")
   mkdirSync(join(organization, ".benedict/skills/linked"))
   symlinkSync(join(area, "outside.md"), join(organization, ".benedict/skills/linked/SKILL.md"))
   commit(organization, "external link")
-  configure()
-  assert.equal(failure("sync"), "skill_error")
-  assert.equal(existsSync(lockPath), false)
+  connect()
+  assert.equal(failure("context", "--worktree"), "skill_error")
 })
 
-test("source/ref mismatch, malformed locks and unsupported transports fail closed", (t) => {
-  const { repo, configure, sync, run, lockPath, organization, failure } = fixture(t)
-  configure()
-  sync()
+test("pinned refs and unsupported transports fail closed", (t) => {
+  const { repo, organization, failure } = fixture(t)
   repoConfig(repo, { organization: { source: organization, ref: "main" } })
-  commit(repo, "changed ref")
-  assert.equal(failure("context", "--worktree"), "organization_unavailable")
-  assert.equal(run("sync").status, 2)
-  configure()
-  writeFileSync(lockPath, JSON.stringify({ version: 1, source: organization, ref: "HEAD", revision: "HEAD" }))
-  commit(repo, "malformed lock")
-  assert.equal(failure("context", "--worktree"), "organization_error")
-  rmSync(lockPath)
+  commit(repo, "pinned ref")
+  assert.equal(failure("context", "--worktree"), "config_error")
   for (const source of ["ext::sh -c anything", "https://user:password@example.com/repo.git", "--upload-pack=anything"]) {
     repoConfig(repo, { organization: { source } })
-    assert.equal(run("sync").status, 2)
+    commit(repo, `source ${source}`)
+    assert.equal(failure("context", "--worktree"), "organization_error")
   }
 })
 
 test("the organization cache cannot be placed in the reviewed repo, including through a symlink", (t) => {
-  const { repo, area, configure, env } = fixture(t)
-  configure()
+  const { repo, area, connect, env } = fixture(t)
+  connect()
   const link = join(area, "cache-link")
   symlinkSync(repo, link)
   for (const cache of [join(repo, "cache"), join(link, "cache")]) {
-    const result = spawnSync(process.execPath, [cli, "sync"], { cwd: repo, encoding: "utf8", env: { ...env, BENEDICT_CACHE_DIR: cache } })
+    const result = spawnSync(process.execPath, [cli, "context", "--worktree"], { cwd: repo, encoding: "utf8", env: { ...env, BENEDICT_CACHE_DIR: cache } })
     assert.equal(result.status, 2)
     assert.equal(JSON.parse(result.stderr).error.code, "organization_error")
     assert.equal(existsSync(join(repo, "cache")), false)
@@ -247,31 +203,40 @@ test("the organization cache cannot be placed in the reviewed repo, including th
 })
 
 test("setup connects an organization while preserving the existing config", (t) => {
-  const { repo, run, organization, revision, lockPath } = fixture(t)
+  const { repo, run, organization, revision, area } = fixture(t)
   repoConfig(repo, { $schema: "https://example.invalid/config.schema.json" })
   const result = run("setup", "--organization", organization, "--skip-skills")
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(JSON.parse(readFileSync(join(repo, ".benedict/config.json"), "utf8")), {
-    $schema: "https://example.invalid/config.schema.json", organization: { source: organization, ref: "HEAD" }
+  assert.match(result.stdout, new RegExp(revision))
+  const configFile = join(repo, ".benedict/config.json")
+  assert.deepEqual(JSON.parse(readFileSync(configFile, "utf8")), {
+    $schema: "https://example.invalid/config.schema.json", organization: { source: organization }
   })
-  assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).revision, revision)
-  const before = readFileSync(lockPath, "utf8")
+  assert.equal(existsSync(join(repo, ".benedict/organization.lock.json")), false)
+  const before = readFileSync(configFile, "utf8")
+  assert.equal(run("setup", "--organization", organization, "--skip-skills").status, 0)
   assert.equal(run("setup", "--skip-skills").status, 0)
-  assert.equal(readFileSync(lockPath, "utf8"), before)
+  assert.equal(readFileSync(configFile, "utf8"), before)
+  const other = join(area, "other-skills")
+  init(other)
+  skill(other, "other", "Other guidance.")
+  commit(other, "other skills")
+  assert.equal(run("setup", "--organization", other, "--skip-skills").status, 2)
+  assert.equal(readFileSync(configFile, "utf8"), before)
 })
 
 test("setup errors preserve config and require explicit non-interactive agent selection", (t) => {
-  const { repo, run, lockPath } = fixture(t)
+  const { repo, run, organization, area } = fixture(t)
   repoConfig(repo, { $schema: "https://example.invalid/config.schema.json" })
   const before = readFileSync(join(repo, ".benedict/config.json"), "utf8")
   assert.equal(run("setup", "--organization", "https://user:secret@example.invalid/repo", "--skip-skills").status, 2)
+  assert.equal(run("setup", "--organization", join(area, "missing"), "--skip-skills").status, 2)
+  assert.equal(run("setup", "--organization", organization, "--ref", "main", "--skip-skills").status, 2)
   assert.equal(readFileSync(join(repo, ".benedict/config.json"), "utf8"), before)
-  assert.equal(existsSync(lockPath), false)
   assert.equal(run("setup", "--yes").status, 2)
   assert.equal(run("setup", "--global", "--project", "--skip-skills").status, 2)
   assert.equal(run("setup", "--config", "other.json", "--skip-skills").status, 2)
 })
-
 test("setup installs the bundled skill and reference through Vercel into isolated user scope", (t) => {
   const { run, home, repo } = fixture(t)
   const result = run("setup", "--global", "--agent", "claude-code", "--yes")
@@ -294,8 +259,8 @@ test("setup supports project skill installation and user installation outside Gi
   assert.equal(invalid.status, 2)
 })
 
-test("failed skill installation leaves the organization declaration and lock untouched", (t) => {
-  const { repo, home, organization, run, lockPath } = fixture(t)
+test("failed skill installation leaves the organization declaration untouched", (t) => {
+  const { repo, home, organization, run } = fixture(t)
   const config = json({ $schema: "https://example.invalid/config.schema.json" })
   write(repo, ".benedict/config.json", config)
   // Block both the canonical directory and the agent's fallback copy target.
@@ -305,25 +270,20 @@ test("failed skill installation leaves the organization declaration and lock unt
   assert.equal(result.status, 2)
   assert.match(result.stderr, /setup_error/)
   assert.equal(readFileSync(join(repo, ".benedict/config.json"), "utf8"), config)
-  assert.equal(existsSync(lockPath), false)
 })
 
-test("concurrent syncs sharing a cache pin each repository's selected ref", async (t) => {
-  const { repo, area, cache, organization, configure, sync, revision, env, lockPath } = fixture(t)
-  configure()
-  sync()
-  git(organization, "branch", "approved", revision)
-  skill(organization, "credentials", "Guidance on the other ref.")
-  const next = commit(organization, "newer guidance")
-  git(organization, "branch", "next", next)
-  repoConfig(repo, { organization: { source: organization, ref: "approved" } })
+test("concurrent reviews sharing a cache each fetch the latest skills", async (t) => {
+  const { repo, area, cache, organization, connect, env } = fixture(t)
+  connect()
   const other = join(area, "other-project")
   init(other)
-  repoConfig(other, { organization: { source: organization, ref: "next" } })
-  for (const coldCache of [false, true]) {
-    if (coldCache) rmSync(cache, { recursive: true })
-    await Promise.all([repo, other].map((cwd) => promisify(execFile)(process.execPath, [cli, "sync", "--update"], { cwd, env })))
-    assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).revision, revision)
-    assert.equal(JSON.parse(readFileSync(join(other, ".benedict/organization.lock.json"), "utf8")).revision, next)
+  repoConfig(other, { organization: { source: organization } })
+  commit(other, "connect organization")
+  for (const coldCache of [true, false]) {
+    if (coldCache) rmSync(cache, { recursive: true, force: true })
+    skill(organization, "credentials", `Guidance with a ${coldCache ? "cold" : "warm"} cache.`)
+    const next = commit(organization, `update for a ${coldCache ? "cold" : "warm"} cache`)
+    const results = await Promise.all([repo, other].map((cwd) => promisify(execFile)(process.execPath, [cli, "context", "--base", "HEAD"], { cwd, env })))
+    for (const result of results) assert.equal((JSON.parse(result.stdout) as ReviewContext).organization?.revision, next)
   }
 })

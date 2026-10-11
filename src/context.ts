@@ -8,19 +8,19 @@ import { loadOrganization } from "./organization.js"
 import { combineSkills, readBuiltinSkills, readCommittedSkills, skillsForPath, summarize } from "./skills.js"
 
 /**
- * Loads the review skills committed at the base: built-in, organization and repository skills.
+ * Loads the review skills: built-in skills, the organization's latest skills and repository skills committed at the base.
  * A repository skill replaces an organization or built-in skill with the same name, and an organization skill replaces a built-in one.
- * A change is reviewed under the policy it starts from, so it cannot rewrite its own review.
+ * The config and repository skills come from the base, so a change cannot rewrite its own review.
  */
 export const loadReviewSkills = Effect.fn("Review.loadSkills")(function*(root: string, base: string) {
   const config = yield* readCommittedConfig(root, base)
-  const organization = config.organization === undefined ? null : yield* loadOrganization(root, base, config.organization)
+  const organization = config.organization === undefined ? null : yield* loadOrganization(root, config.organization)
   const skills = combineSkills(
     yield* readBuiltinSkills(),
     organization?.skills ?? [],
     yield* readCommittedSkills(root, base, "repository")
   )
-  return { organization: organization?.lock ?? null, skills }
+  return { organization: organization?.organization ?? null, skills }
 })
 
 export const collectSnapshot = Effect.fn("Review.collectSnapshot")(function*(options: ReviewOptions) {

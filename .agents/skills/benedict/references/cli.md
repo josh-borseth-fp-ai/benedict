@@ -11,9 +11,9 @@ benedict context --repo /path/to/project --worktree
 
 JSON is the default output. `--format text` produces a readable summary. Both commands accept `--repo`, `--base`, `--head`, `--worktree`, and `--format`. `--worktree` and `--head` cannot be combined. `context` also accepts `--pr` for a GitHub PR; see the [GitHub PR workflow](#github-pr-workflow).
 
-The default commit range is `HEAD~1` to `HEAD`; the default worktree base is `HEAD`. The context contains resolved commit hashes, the organization lock (or `null`), the review `skills` (name, description, scope and optional `paths`), and changed files with patches, line counts, changed lines, and the names of the skills that apply to each. Commit source comes from Git. Worktree source is the current on-disk content, including staged, unstaged, and untracked files that Git does not ignore.
+The default commit range is `HEAD~1` to `HEAD`; the default worktree base is `HEAD`. The context contains resolved commit hashes, the organization source and fetched revision (or `null`), the review `skills` (name, description, scope and optional `paths`), and changed files with patches, line counts, changed lines, and the names of the skills that apply to each. Commit source comes from Git. Worktree source is the current on-disk content, including staged, unstaged, and untracked files that Git does not ignore.
 
-Skills, `.benedict/config.json` and the organization lock are read from the base commit, never from the change under review. See [skills.md](skills.md).
+Repository skills and `.benedict/config.json` are read from the base commit, never from the change under review. Organization skills are fetched from the organization's default branch on every run. See [skills.md](skills.md).
 
 ## Skill
 
@@ -67,7 +67,7 @@ Report the resolved base and head, accepted findings, and rejected count. Keep t
 
 The skill also requires an overall **Confidence: N/5** with a rationale. This is confidence that the reviewed change is safe to merge, and follows the rubric in [SKILL.md](../SKILL.md#overall-confidence). Keep it in the Markdown report, and pass it to `publish` as `--confidence`; the JSON finding field `confidence` remains a number from 0 to 1.
 
-When an organization is configured, include the source and organization revision from the check report. Read [skills.md](skills.md) for lock and cache failures. Setup and sync are onboarding/update operations, separate from the read-only review workflow.
+When an organization is configured, include the source and organization revision from the check report. Read [skills.md](skills.md) for organization fetch failures. Setup is an onboarding operation, separate from the read-only review workflow.
 
 ## GitHub PR workflow
 
