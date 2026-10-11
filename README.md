@@ -41,7 +41,6 @@ benedict check findings.json             # validate draft findings
 benedict publish findings.json --pr <PR URL> --confidence 4 --decision approve|comment [--dry-run]
 
 benedict setup                           # install the skill
-benedict sync                            # fetch organization skills
 ```
 
 Run `benedict <command> --help` for flags. The finding format is in [`references/cli.md`](.agents/skills/benedict/references/cli.md).
@@ -104,7 +103,7 @@ paths: ["billing/**"]
 Report double charges, lost refunds and rounding that changes totals.
 ```
 
-`paths` is optional; without it the skill applies to every file. A repository skill with the same name as an organization or built-in skill replaces it. Skills are read from the review's base commit, so a PR can't change the skills it's reviewed under. See [`references/skills.md`](.agents/skills/benedict/references/skills.md).
+`paths` is optional; without it the skill applies to every file. A repository skill with the same name as an organization or built-in skill replaces it. Repository skills are read from the review's base commit, so a PR can't change the skills it's reviewed under. See [`references/skills.md`](.agents/skills/benedict/references/skills.md).
 
 ## Organization skills
 
@@ -114,7 +113,7 @@ Teams can share skills from a separate Git repository that keeps them in `.bened
 benedict setup --organization https://github.com/your-org/engineering-skills.git
 ```
 
-This writes `.benedict/config.json`, which holds only the organization source, and pins a revision in `.benedict/organization.lock.json`. Commit both. `benedict sync` restores the pinned revision on a new machine, and `benedict sync --update` moves it forward.
+This writes `.benedict/config.json`, which holds only the organization source. Commit it. There is nothing to pin or sync: every review fetches the organization repository's default branch and uses its latest skills, and the review records which commit it used. A change to the organization's skills applies to every connected repository's next review, so protect that repository's default branch.
 
 ## Develop
 

@@ -4,15 +4,14 @@ import { stripVTControlCharacters } from "node:util"
 import { Effect, FileSystem, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { readRepositoryConfig } from "./config.js"
+import { repositoryRoot } from "./git.js"
 import { ReviewError, configPath } from "./model.js"
-import type { ConfigFile, OrganizationLock } from "./model.js"
-import { readLock, resolveOrganization, reviewDirectory, writeAtomically, writeLock } from "./organization.js"
-import { prepareOrganization, repositoryRoot } from "./sync.js"
+import type { ConfigFile, OrganizationRevision } from "./model.js"
+import { loadOrganization, resolveSource, reviewDirectory, writeAtomically } from "./organization.js"
 
 export interface SetupOptions {
   readonly repo: string
   readonly organization?: string
-  readonly ref?: string
   readonly project: boolean
   readonly agents: ReadonlyArray<string>
   readonly yes: boolean
@@ -68,39 +67,28 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
   if (options.yes && !options.skipSkills && options.agents.length === 0) {
     return yield* new ReviewError({ code: "setup_error", message: "For non-interactive setup, select agents with --agent <name> (repeat as needed, or use --agent '*')." })
   }
-  if (options.ref !== undefined && options.organization === undefined) {
-    return yield* new ReviewError({ code: "setup_error", message: `--ref requires --organization. Edit an existing organization ref in ${configPath} and run benedict sync --update.` })
-  }
   const path = yield* Path.Path
   const location = yield* repositoryRoot(options.repo).pipe(Effect.result)
   if (location._tag === "Failure" && (options.project || options.organization !== undefined)) {
     return yield* new ReviewError({ code: "setup_error", message: "Project installation and organization setup require a Git repository. Run inside a project or pass --repo." })
   }
   const root = location._tag === "Success" ? location.success : null
-  let lock: OrganizationLock | null = null
+  let organization: OrganizationRevision | null = null
   let declaration: { source: string | null; decoded: ConfigFile } | null = null
-  if (root !== null) {
+  if (root !== null && options.organization !== undefined) {
     const local = yield* readRepositoryConfig(root)
-    let decoded = local.decoded
-    if (options.organization !== undefined) {
-      const requested = { source: options.organization, ref: options.ref ?? local.decoded.organization?.ref ?? "HEAD" }
-      const resolved = yield* resolveOrganization(root, requested)
-      if (local.decoded.organization) {
-        const current = yield* resolveOrganization(root, local.decoded.organization)
-        if (current.source !== resolved.source || current.ref !== resolved.ref) {
-          return yield* new ReviewError({ code: "setup_error", message: "This repository already selects another organization source/ref. Edit its config and run benedict sync --update for an explicit change." })
-        }
-      } else {
-        decoded = { ...decoded, organization: requested }
-        declaration = { source: local.source, decoded }
+    const requested = { source: options.organization }
+    if (local.decoded.organization) {
+      if ((yield* resolveSource(root, local.decoded.organization)) !== (yield* resolveSource(root, requested))) {
+        return yield* new ReviewError({ code: "setup_error", message: `This repository already selects another organization source. Edit ${configPath} to change it.` })
       }
+    } else {
+      declaration = { source: local.source, decoded: { ...local.decoded, organization: requested } }
     }
-    if (decoded.organization) lock = (yield* prepareOrganization(root, decoded, false)).lock
+    // Fetch once so an unreachable source or a repository without skills fails before anything is written.
+    organization = (yield* loadOrganization(root, requested)).organization
   }
   if (!options.skipSkills) yield* installSkill(root ?? path.resolve(options.repo), options)
-  if (root !== null) {
-    if (declaration) yield* saveDeclaration(root, declaration.source, declaration.decoded)
-    if (lock && JSON.stringify(yield* readLock(root)) !== JSON.stringify(lock)) yield* writeLock(root, lock)
-  }
-  return { skillInstalled: !options.skipSkills, scope: options.project ? "project" : "user", repository: root, organization: lock }
+  if (root !== null && declaration) yield* saveDeclaration(root, declaration.source, declaration.decoded)
+  return { skillInstalled: !options.skipSkills, scope: options.project ? "project" : "user", repository: root, organization, configChanged: declaration !== null }
 })

@@ -13,7 +13,7 @@ const decodeConfig = Effect.fn("Review.decodeConfig")(function*(text: string, fi
   )
 })
 
-/** The working-tree config, which setup and sync edit. */
+/** The working-tree config, which setup edits. */
 export const readRepositoryConfig = Effect.fn("Review.readConfig")(function*(root: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
