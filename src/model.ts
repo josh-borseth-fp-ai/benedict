@@ -29,10 +29,10 @@ export type Finding = typeof Finding.Type
 
 /** Repository paths owned by the Benedict CLI. Every scope keeps its state under `.benedict/`. */
 export const configPath = ".benedict/config.json"
-export const lockPath = ".benedict/organization.lock.json"
 export const skillsPath = ".benedict/skills"
 
-export const OrganizationReference = Schema.Struct({ source: NonBlank, ref: Schema.optionalKey(NonBlank) })
+/** The organization skills repository. Reviews always use the latest commit on its default branch. */
+export const OrganizationReference = Schema.Struct({ source: NonBlank })
 export type OrganizationReference = typeof OrganizationReference.Type
 export const ConfigFile = Schema.Struct({
   $schema: Schema.optionalKey(NonBlank),
@@ -40,13 +40,11 @@ export const ConfigFile = Schema.Struct({
 })
 export type ConfigFile = typeof ConfigFile.Type
 
-export const OrganizationLock = Schema.Struct({
-  version: Schema.Literal(1),
-  source: NonBlank,
-  ref: NonBlank,
-  revision: Schema.String.check(Schema.isPattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/))
-})
-export type OrganizationLock = typeof OrganizationLock.Type
+/** The organization commit a review fetched, recorded so the review shows which skills it used. */
+export interface OrganizationRevision {
+  readonly source: string
+  readonly revision: string
+}
 
 export type SkillScope = "built-in" | "organization" | "repository"
 
@@ -92,7 +90,7 @@ export interface ReviewContext {
   readonly repository: string
   readonly range: ReviewRange
   readonly pullRequest?: { readonly url: string }
-  readonly organization: OrganizationLock | null
+  readonly organization: OrganizationRevision | null
   readonly skills: ReadonlyArray<SkillSummary>
   readonly files: ReadonlyArray<ChangedFile>
 }
@@ -113,7 +111,7 @@ export interface CheckReport {
   readonly repository: string
   readonly range: ReviewRange
   readonly accepted: ReadonlyArray<Finding>
-  readonly organization: OrganizationLock | null
+  readonly organization: OrganizationRevision | null
   readonly rejected: ReadonlyArray<{
     readonly index: number
     readonly finding: unknown

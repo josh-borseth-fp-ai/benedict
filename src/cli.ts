@@ -6,15 +6,14 @@ import { FetchHttpClient } from "effect/http"
 import { AppGitHub } from "./app-github.js"
 import { checkFindings, readFindings } from "./check.js"
 import { collectSnapshot, loadReviewSkills } from "./context.js"
-import { Git } from "./git.js"
+import { Git, repositoryRoot } from "./git.js"
 import { GitHub } from "./github.js"
 import { readAppCredentials } from "./infisical.js"
 import { publishReview } from "./publish.js"
 import { resolvePullRequest } from "./pull-request.js"
-import { ReviewError, configPath, lockPath, skillsPath } from "./model.js"
+import { ReviewError, configPath } from "./model.js"
 import type { CheckReport, ReviewContext, ReviewOptions } from "./model.js"
 import { setup } from "./setup.js"
-import { repositoryRoot, syncOrganization } from "./sync.js"
 
 const rangeFlags = {
   repo: Flag.String("repo").pipe(Flag.withDefault("."), Flag.withDescription("Repository directory")),
@@ -82,7 +81,7 @@ const skillCommand = Command.make("skill", {
   const skill = skills.find((item) => item.name === flags.name)
   if (skill === undefined) return yield* new ReviewError({ code: "skill_error", message: `No review skill named ${JSON.stringify(flags.name)}. Available: ${skills.map((item) => item.name).join(", ")}.` })
   yield* Console.log(skill.content.trimEnd())
-})).pipe(Command.withDescription("Print a review skill's instructions as committed at the review's base."))
+})).pipe(Command.withDescription("Print a review skill's instructions: the latest organization version, or as committed at the review's base."))
 
 const checkCommand = Command.make("check", {
   ...rangeFlags,
@@ -95,31 +94,24 @@ const checkCommand = Command.make("check", {
   yield* Effect.sync(() => { process.exitCode = report.summary.rejected > 0 ? 1 : 0 })
 })).pipe(Command.withDescription("Validate finding structure, source evidence and repository policy."))
 
-const syncCommand = Command.make("sync", {
-  repo: rangeFlags.repo,
-  format: rangeFlags.format,
-  update: Flag.Boolean("update").pipe(Flag.withDefault(false), Flag.withDescription("Resolve the configured ref again and update the committed organization lock"))
-}, Effect.fn(function*(flags) {
-  const root = yield* repositoryRoot(flags.repo)
-  const result = yield* syncOrganization(root, flags.update)
-  yield* Console.log(flags.format === "json" ? JSON.stringify(result, null, 2) :
-    `Organization: ${result.organization.source}\nRevision: ${result.organization.revision}\nSkills: ${result.skills.join(", ")}\n${result.lockChanged ? `Updated ${lockPath}; review and commit it.` : "Cached locked revision; lock unchanged."}`)
-})).pipe(Command.withDescription("Cache the locked organization skills; --update explicitly advances their revision."))
-
 const setupCommand = Command.make("setup", {
   repo: rangeFlags.repo,
-  organization: Flag.String("organization").pipe(Flag.optional, Flag.withDescription("Organization skills Git URL or local repository path")),
-  ref: Flag.String("ref").pipe(Flag.optional, Flag.withDescription("Organization branch, tag or commit; defaults to HEAD")),
+  organization: Flag.String("organization").pipe(Flag.optional, Flag.withDescription("Organization skills Git URL or local repository path; reviews always use its latest default branch")),
   agent: Flag.String("agent").pipe(Flag.atLeast(0), Flag.withDescription("Agent to install the skill for; repeat, or use '*' for all supported agents")),
   yes: Flag.Boolean("yes").pipe(Flag.withDefault(false), Flag.withDescription("Skip installer prompts; requires explicit --agent selections")),
-  skipSkills: Flag.Boolean("skip-skills").pipe(Flag.withDefault(false), Flag.withDescription("Configure and sync organization skills only; keep the existing Benedict skill installation"))
+  skipSkills: Flag.Boolean("skip-skills").pipe(Flag.withDefault(false), Flag.withDescription("Only connect organization skills; keep the existing Benedict skill installation"))
 }, Effect.fn(function*(flags) {
   const result = yield* setup({
     repo: flags.repo,
-    organization: Option.getOrUndefined(flags.organization), ref: Option.getOrUndefined(flags.ref),
+    organization: Option.getOrUndefined(flags.organization),
     agents: flags.agent, yes: flags.yes, skipSkills: flags.skipSkills
   })
-  yield* Console.log(`${result.skillInstalled ? `Installed the Benedict skill into ${result.repository}. Commit it with the repository.` : "Skill installation skipped."}\n${result.organization ? `Organization revision: ${result.organization.revision}\nReview and commit ${configPath} and ${lockPath}.` : `No organization configured; built-in and ${skillsPath} skills apply.`}\nAsk your coding agent to use the benedict skill to review your change.`)
+  yield* Console.log([
+    result.skillInstalled ? `Installed the Benedict skill into ${result.repository}. Commit it with the repository.` : "Skill installation skipped.",
+    ...(result.organization ? [`Organization skills: ${result.organization.source} (latest revision ${result.organization.revision}); every review fetches the latest.`] : []),
+    ...(result.configChanged ? [`Review and commit ${configPath}.`] : []),
+    "Ask your coding agent to use the benedict skill to review your change."
+  ].join("\n"))
 })).pipe(Command.withDescription("Install the bundled skill into this repository and connect it to organization knowledge."))
 
 const publishCommand = Command.make("publish", {
@@ -156,7 +148,7 @@ const publishCommand = Command.make("publish", {
 
 export const benedictCommand = Command.make("benedict").pipe(
   Command.withDescription("Benedict: deterministic code review tools for coding agents."),
-  Command.withSubcommands([contextCommand, skillCommand, checkCommand, publishCommand, syncCommand, setupCommand])
+  Command.withSubcommands([contextCommand, skillCommand, checkCommand, publishCommand, setupCommand])
 )
 
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string }

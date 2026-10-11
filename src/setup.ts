@@ -4,15 +4,14 @@ import { stripVTControlCharacters } from "node:util"
 import { Effect, FileSystem, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { readRepositoryConfig } from "./config.js"
+import { repositoryRoot } from "./git.js"
 import { ReviewError, configPath } from "./model.js"
-import type { ConfigFile, OrganizationLock } from "./model.js"
-import { readLock, resolveOrganization, reviewDirectory, writeAtomically, writeLock } from "./organization.js"
-import { prepareOrganization, repositoryRoot } from "./sync.js"
+import type { ConfigFile, OrganizationRevision } from "./model.js"
+import { loadOrganization, resolveSource, reviewDirectory, writeAtomically } from "./organization.js"
 
 export interface SetupOptions {
   readonly repo: string
   readonly organization?: string
-  readonly ref?: string
   readonly agents: ReadonlyArray<string>
   readonly yes: boolean
   readonly skipSkills: boolean
@@ -66,30 +65,24 @@ export const setup = Effect.fn("Setup.run")(function*(options: SetupOptions) {
   if (options.yes && !options.skipSkills && options.agents.length === 0) {
     return yield* new ReviewError({ code: "setup_error", message: "For non-interactive setup, select agents with --agent <name> (repeat as needed, or use --agent '*')." })
   }
-  if (options.ref !== undefined && options.organization === undefined) {
-    return yield* new ReviewError({ code: "setup_error", message: `--ref requires --organization. Edit an existing organization ref in ${configPath} and run benedict sync --update.` })
-  }
   const root = yield* repositoryRoot(options.repo).pipe(Effect.mapError(() =>
     new ReviewError({ code: "setup_error", message: "Setup installs Benedict into a Git repository. Run inside a project or pass --repo." })))
-  const local = yield* readRepositoryConfig(root)
-  let decoded = local.decoded
+  let organization: OrganizationRevision | null = null
   let declaration: { source: string | null; decoded: ConfigFile } | null = null
   if (options.organization !== undefined) {
-    const requested = { source: options.organization, ref: options.ref ?? local.decoded.organization?.ref ?? "HEAD" }
-    const resolved = yield* resolveOrganization(root, requested)
+    const local = yield* readRepositoryConfig(root)
+    const requested = { source: options.organization }
     if (local.decoded.organization) {
-      const current = yield* resolveOrganization(root, local.decoded.organization)
-      if (current.source !== resolved.source || current.ref !== resolved.ref) {
-        return yield* new ReviewError({ code: "setup_error", message: "This repository already selects another organization source/ref. Edit its config and run benedict sync --update for an explicit change." })
+      if ((yield* resolveSource(root, local.decoded.organization)) !== (yield* resolveSource(root, requested))) {
+        return yield* new ReviewError({ code: "setup_error", message: `This repository already selects another organization source. Edit ${configPath} to change it.` })
       }
     } else {
-      decoded = { ...decoded, organization: requested }
-      declaration = { source: local.source, decoded }
+      declaration = { source: local.source, decoded: { ...local.decoded, organization: requested } }
     }
+    // Fetch once so an unreachable source or a repository without skills fails before anything is written.
+    organization = (yield* loadOrganization(root, requested)).organization
   }
-  const lock: OrganizationLock | null = decoded.organization ? (yield* prepareOrganization(root, decoded, false)).lock : null
   if (!options.skipSkills) yield* installSkill(root, options)
   if (declaration) yield* saveDeclaration(root, declaration.source, declaration.decoded)
-  if (lock && JSON.stringify(yield* readLock(root)) !== JSON.stringify(lock)) yield* writeLock(root, lock)
-  return { skillInstalled: !options.skipSkills, repository: root, organization: lock }
+  return { skillInstalled: !options.skipSkills, repository: root, organization, configChanged: declaration !== null }
 })

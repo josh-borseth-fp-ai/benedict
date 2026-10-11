@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, Layer, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Path, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ReviewError } from "./model.js"
 
@@ -39,6 +39,12 @@ export class Git extends Context.Service<Git, {
     return Git.of({ run })
   }))
 }
+
+export const repositoryRoot = Effect.fn("Git.repositoryRoot")(function*(directory: string) {
+  const git = yield* Git
+  const path = yield* Path.Path
+  return (yield* git.run(path.resolve(directory), ["rev-parse", "--show-toplevel"])).replace(/\r?\n$/, "")
+})
 
 export interface RawChange {
   readonly path: string

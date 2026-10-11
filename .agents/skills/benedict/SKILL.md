@@ -23,7 +23,7 @@ Review skills say what to look for. Context lists every skill with its name, des
 
 For each skill that applies to a changed file, run `benedict skill <name> --repo <repository> --base <range.base>` and follow its instructions for those files. Skills come from the review's base commit, so a change is always reviewed under the skills it started from. Every finding names the one skill it falls under, and that skill must apply to the finding's file.
 
-When the organization is configured, include its revision in the report. If context fails because organization skills are unavailable, see [references/skills.md](references/skills.md); do not run setup or `sync --update` during a review, and do not review without the organization's skills.
+When the organization is configured, include its revision in the report. If context fails because organization skills are unavailable, see [references/skills.md](references/skills.md); do not run setup during a review, and do not review without the organization's skills.
 
 ## Rules
 

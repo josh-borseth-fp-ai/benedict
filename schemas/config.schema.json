@@ -12,9 +12,6 @@
       "properties": {
         "source": {
           "type": "string"
-        },
-        "ref": {
-          "type": "string"
         }
       },
       "required": [
